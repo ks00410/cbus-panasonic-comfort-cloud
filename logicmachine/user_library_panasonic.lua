@@ -8,6 +8,15 @@
                Follows cbus-lua skill structure, safe C-Bus I/O with error suppression,
                Auth0 OAuth2 token refresh, dynamic SHA-256 HMAC signing, version
                auto-fallback on 4106 errors, and secrets isolation via user.secrets.
+
+  Features:
+    - Full Climate Control: Power, Target Temp, Inside/Outside Temp, Mode, Fan Speed, Eco
+    - Zone Damper Control: Multi-zone On/Off, Damper % (0-100), and Zone Temperatures
+    - Energy & Power Telemetry: Daily Energy (kWh), Heating/Cooling Breakdown, Extrapolated Power (W)
+    - Air Quality & Cleanliness: Nanoe air purification, Inside Cleaning mode
+    - Louvre Swing: Vertical (UD) and Horizontal (LR) Swing modes
+    - Advanced Eco: EcoNavi, iAuto-X / AI ECO
+    - Diagnostics & Heartbeat: Online status, UTC timestamp, Error/Fault codes
 ================================================================================
 --]]
 
@@ -58,13 +67,11 @@ local DEFAULT_APP_VERSION = "1.20.0"
 -- Persistent storage keys in LogicMachine database
 local STORAGE_KEY         = "panasonic_session"
 local STORAGE_VERSION_KEY = "panasonic_app_version"
+local STORAGE_ENERGY_KEY  = "panasonic_energy_cache"
 
 -- Target temperature boundaries (°C)
 local MIN_TARGET_TEMP = 16.0
 local MAX_TARGET_TEMP = 30.0
-
--- Network timeouts (seconds)
-local HTTP_TIMEOUT_SEC = 10
 
 
 -- =============================================================================
@@ -127,6 +134,26 @@ P.NanoeMode = {
   All         = 4
 }
 
+-- EcoNavi Modes
+P.EcoNaviMode = {
+  Unavailable = 0,
+  Off         = 1,
+  On          = 2
+}
+
+-- iAuto-X / AI ECO Modes
+P.IAutoXMode = {
+  Unavailable = 0,
+  Off         = 1,
+  On          = 2
+}
+
+-- Zone Modes
+P.ZoneMode = {
+  Off = 0,
+  On  = 1
+}
+
 local OPERATION_MODE_NAMES = {
   [0] = "Auto",
   [1] = "Dry",
@@ -150,6 +177,25 @@ local ECO_MODE_NAMES = {
   [2] = "Quiet"
 }
 
+local AIR_SWING_UD_NAMES = {
+  [-1] = "Auto",
+  [0]  = "Up",
+  [3]  = "UpMid",
+  [2]  = "Mid",
+  [4]  = "DownMid",
+  [1]  = "Down",
+  [5]  = "Swing"
+}
+
+local AIR_SWING_LR_NAMES = {
+  [-1] = "Auto",
+  [1]  = "Left",
+  [5]  = "LeftMid",
+  [2]  = "Mid",
+  [4]  = "RightMid",
+  [0]  = "Right"
+}
+
 
 -- =============================================================================
 -- 4. MODULE STATE
@@ -163,6 +209,9 @@ local _cachedSession = nil
 
 -- Cached App Version
 local _cachedAppVersion = nil
+
+-- Energy extrapolation state: { last_consumption, last_time, last_power }
+local _energyState = {}
 
 
 -- =============================================================================
@@ -265,6 +314,21 @@ local function clamp(val, min_val, max_val)
   return val
 end
 
+-- Format local timezone offset as "+HH:MM" or "-HH:MM"
+local function getLocalTimezoneOffset()
+  local now = os.time()
+  local utc_date = os.date("!*t", now)
+  local local_date = os.date("*t", now)
+  local utc_sec = os.time(utc_date)
+  local local_sec = os.time(local_date)
+  local diff_sec = os.difftime(local_sec, utc_sec)
+  local sign = (diff_sec >= 0) and "+" or "-"
+  diff_sec = math.abs(diff_sec)
+  local hours = math.floor(diff_sec / 3600)
+  local mins = math.floor((diff_sec % 3600) / 60)
+  return string.format("%s%02d:%02d", sign, hours, mins)
+end
+
 -- Generate dynamic HMAC / SHA-256 signature key for Panasonic API requests
 local function generateCfcApiKey(timestamp_ms, access_token)
   local raw_str = "Comfort Cloud" .. "521325fb2dd486bf4831b47644317fca" .. tostring(timestamp_ms) .. "Bearer " .. access_token
@@ -313,10 +377,10 @@ end
 -- 8. DERIVED VALUE FUNCTIONS
 -- =============================================================================
 
--- Format temperature values, ignoring Panasonic sentinel unplugged values (126, 255)
+-- Format temperature values, ignoring Panasonic sentinel unplugged values (126, 255, -255)
 local function sanitizeTemperature(raw_val)
   local t = extractNumber(raw_val)
-  if t == nil or t == 126 or t == 255 or t < -40 or t > 70 then
+  if t == nil or t == 126 or t == 255 or t == -255 or t < -40 or t > 70 then
     return nil
   end
   return t
@@ -338,6 +402,56 @@ end
 local function getEcoModeName(eco_val)
   local e = extractNumber(eco_val)
   return e and ECO_MODE_NAMES[e] or "Unknown"
+end
+
+-- Human readable vertical swing name
+local function getAirSwingUDName(ud_val)
+  local u = extractNumber(ud_val)
+  return u and AIR_SWING_UD_NAMES[u] or "Unknown"
+end
+
+-- Human readable horizontal swing name
+local function getAirSwingLRName(lr_val)
+  local l = extractNumber(lr_val)
+  return l and AIR_SWING_LR_NAMES[l] or "Unknown"
+end
+
+-- Calculate instantaneous power (Watts) extrapolated from energy reading diffs
+local function calculateExtrapolatedPower(guid, current_energy_kwh)
+  if current_energy_kwh == nil or current_energy_kwh < 0 then return nil end
+
+  local now_sec = os.time()
+  local state = _energyState[guid]
+
+  if not state then
+    _energyState[guid] = {
+      last_consumption = current_energy_kwh,
+      last_time = now_sec,
+      power = 0
+    }
+    return 0
+  end
+
+  local time_diff_hr = (now_sec - state.last_time) / 3600.0
+  local energy_diff_kwh = current_energy_kwh - state.last_consumption
+
+  -- If meter reset at midnight or daily turnover, reset baseline
+  if energy_diff_kwh < 0 then
+    energy_diff_kwh = current_energy_kwh
+  end
+
+  if time_diff_hr > 0.001 and energy_diff_kwh > 0 then
+    -- Power (W) = (kWh / hours) * 1000
+    local power_watts = (energy_diff_kwh / time_diff_hr) * 1000.0
+    state.power = math.floor(power_watts + 0.5)
+    state.last_consumption = current_energy_kwh
+    state.last_time = now_sec
+  elseif time_diff_hr > (25 * 60) then
+    -- If no energy delta after 25 minutes, assume unit is idle (0 W)
+    state.power = 0
+  end
+
+  return state.power
 end
 
 
@@ -480,7 +594,6 @@ function P.RefreshAccessToken(session, dbg)
   -- Error 4106 indicates app version is outdated — attempt fallback/bump
   if acc_code == 401 and acc_raw and acc_raw:find("4106") then
     log("PANASONIC: App version rejected (code 4106), attempting version refresh...")
-    -- Bump minor version fallback or fetch latest
     setAppVersion("1.21.0")
     login_headers = getAccHeaders(session, false)
     acc_code, acc_resp = httpsPostJson(BASE_PATH_ACC .. "/auth/v2/login", { language = 0 }, login_headers, dbg)
@@ -535,7 +648,7 @@ end
 
 
 -- =============================================================================
--- 10. PAYLOAD PARSER & STATUS GETTERS
+-- 10. PAYLOAD PARSER & STATUS / ENERGY GETTERS
 -- =============================================================================
 
 -- Fetch all registered devices
@@ -561,9 +674,68 @@ function P.GetDevices(dbg)
   return nil, "Failed to get devices: HTTP " .. tostring(code)
 end
 
--- Fetch and parse live status of a single AC GUID
+-- Fetch today's energy consumption data for a device
+function P.GetEnergy(device_guid, dbg)
+  if not device_guid or #device_guid == 0 then
+    local sec = loadSecrets()
+    if sec and sec.device_guid then
+      device_guid = sec.device_guid
+    end
+  end
+
+  if not device_guid or #device_guid == 0 then
+    return nil, "Device GUID is required"
+  end
+
+  local session, err = P.GetValidSession(dbg)
+  if not session then return nil, err end
+
+  local today_str = os.date("%Y%m%d")
+  local payload = {
+    deviceGuid = device_guid,
+    dataMode = 2, -- Month data mode contains daily items
+    date = today_str,
+    osTimezone = getLocalTimezoneOffset()
+  }
+
+  local headers = getAccHeaders(session, true)
+  local url = BASE_PATH_ACC .. "/deviceHistoryData"
+  local code, resp = httpsPostJson(url, payload, headers, dbg)
+
+  if code == 401 then
+    session = P.RefreshAccessToken(session, dbg)
+    if session then
+      headers = getAccHeaders(session, true)
+      code, resp = httpsPostJson(url, payload, headers, dbg)
+    end
+  end
+
+  if code == 200 and resp and resp.historyDataList then
+    local energy_result = {
+      consumption = 0.0,
+      heating_rate = 0.0,
+      cooling_rate = 0.0,
+      current_power_w = 0
+    }
+
+    for _, item in ipairs(resp.historyDataList) do
+      if item.dataTime == today_str then
+        energy_result.consumption = extractNumber(item.consumption) or 0.0
+        energy_result.heating_rate = extractNumber(item.heatConsumptionRate) or 0.0
+        energy_result.cooling_rate = extractNumber(item.coolConsumptionRate) or 0.0
+        break
+      end
+    end
+
+    energy_result.current_power_w = calculateExtrapolatedPower(device_guid, energy_result.consumption)
+    return energy_result
+  end
+
+  return nil, "Energy fetch failed: HTTP " .. tostring(code)
+end
+
+-- Fetch and parse live status of a single AC GUID (including zones & telemetry)
 function P.GetStatus(device_guid, dbg)
-  -- Fallback to device_guid defined in user.secrets if not provided
   if not device_guid or #device_guid == 0 then
     local sec = loadSecrets()
     if sec and sec.device_guid then
@@ -593,28 +765,56 @@ function P.GetStatus(device_guid, dbg)
   if code == 200 and resp and resp.parameters then
     local p = resp.parameters
     local parsed = {
-      raw          = p,
-      power        = p.operate == 1,
-      target_temp  = sanitizeTemperature(p.temperatureSet),
-      inside_temp  = sanitizeTemperature(p.insideTemperature),
-      outside_temp = sanitizeTemperature(p.outTemperature),
-      mode         = extractNumber(p.operationMode),
-      mode_name    = getModeName(p.operationMode),
-      fan_speed    = extractNumber(p.fanSpeed),
-      fan_name     = getFanSpeedName(p.fanSpeed),
-      eco_mode     = extractNumber(p.ecoMode),
-      eco_name     = getEcoModeName(p.ecoMode),
-      nanoe        = extractNumber(p.nanoe),
-      air_swing_ud = extractNumber(p.airSwingUD),
-      air_swing_lr = extractNumber(p.airSwingLR)
+      raw              = p,
+      power            = p.operate == 1,
+      target_temp      = sanitizeTemperature(p.temperatureSet),
+      inside_temp      = sanitizeTemperature(p.insideTemperature),
+      outside_temp     = sanitizeTemperature(p.outTemperature),
+      mode             = extractNumber(p.operationMode),
+      mode_name        = getModeName(p.operationMode),
+      fan_speed        = extractNumber(p.fanSpeed),
+      fan_name         = getFanSpeedName(p.fanSpeed),
+      eco_mode         = extractNumber(p.ecoMode),
+      eco_name         = getEcoModeName(p.ecoMode),
+      air_swing_ud     = extractNumber(p.airSwingUD),
+      air_swing_ud_name= getAirSwingUDName(p.airSwingUD),
+      air_swing_lr     = extractNumber(p.airSwingLR),
+      air_swing_lr_name= getAirSwingLRName(p.airSwingLR),
+      fan_auto_mode    = extractNumber(p.fanAutoMode),
+      nanoe            = extractNumber(p.nanoe),
+      eco_navi         = extractNumber(p.ecoNavi),
+      iauto_x          = extractNumber(p.iAutoX) or extractNumber(p.iauto),
+      inside_cleaning  = extractNumber(p.insideCleaning),
+      air_quality      = extractNumber(p.airQuality),
+      error_status     = extractNumber(p.errorStatus) or 0,
+      timestamp        = resp.timestamp or os.time(),
+      zones            = {}
     }
+
+    -- Parse Zone Parameters if ducted zoning is installed
+    if p.zoneParameters and type(p.zoneParameters) == "table" then
+      for _, z in ipairs(p.zoneParameters) do
+        local zid = extractNumber(z.zoneId)
+        if zid then
+          parsed.zones[zid] = {
+            id          = zid,
+            name        = z.zoneName or ("Zone " .. tostring(zid)),
+            power       = (z.zoneOnOff == 1),
+            damper      = extractNumber(z.zoneLevel) or 0,
+            temperature = sanitizeTemperature(z.zoneTemperature),
+            spill       = extractNumber(z.zoneSpill) or 0
+          }
+        end
+      end
+    end
+
     return parsed
   end
 
   return nil, "Status request failed: HTTP " .. tostring(code)
 end
 
--- Send control parameters to an AC unit
+-- Send control parameters to an AC unit or individual zones
 function P.ControlDevice(device_guid, params, dbg)
   if not device_guid or #device_guid == 0 then
     local sec = loadSecrets()
@@ -656,29 +856,68 @@ function P.ControlDevice(device_guid, params, dbg)
   return false, "Control failed: HTTP " .. tostring(code)
 end
 
+-- Dedicated helper to control an individual zone
+function P.ControlZone(device_guid, zone_id, zone_on_off, zone_level_percent, dbg)
+  local zone_entry = { zoneId = tonumber(zone_id) }
+  if zone_on_off ~= nil then
+    zone_entry.zoneOnOff = (zone_on_off == true or zone_on_off == 1 or zone_on_off == 255) and 1 or 0
+  end
+  if zone_level_percent ~= nil then
+    zone_entry.zoneLevel = clamp(math.floor(tonumber(zone_level_percent) + 0.5), 0, 100)
+  end
+
+  local params = {
+    zoneParameters = { zone_entry }
+  }
+  return P.ControlDevice(device_guid, params, dbg)
+end
+
 
 -- =============================================================================
 -- 11. RESIDENT POLL & EVENT CONTROL ENTRY POINTS
 -- =============================================================================
 
 -- Debug alignment helper
-local function printDebugTable(parsed)
+local function printDebugTable(parsed, energy)
   local lines = {
-    "----------------------------------",
-    "  PANASONIC COMFORT CLOUD STATUS  ",
-    "----------------------------------"
+    "--------------------------------------------------",
+    "         PANASONIC COMFORT CLOUD TELEMETRY        ",
+    "--------------------------------------------------"
   }
-  lines[#lines + 1] = string.format("  %-20s %s", "Power:", parsed.power and "ON" or "OFF")
-  lines[#lines + 1] = string.format("  %-20s %s °C", "Target Temp:", tostring(parsed.target_temp or "-"))
-  lines[#lines + 1] = string.format("  %-20s %s °C", "Inside Temp:", tostring(parsed.inside_temp or "-"))
-  lines[#lines + 1] = string.format("  %-20s %s °C", "Outside Temp:", tostring(parsed.outside_temp or "-"))
-  lines[#lines + 1] = string.format("  %-20s %s (%s)", "Mode:", tostring(parsed.mode), parsed.mode_name)
-  lines[#lines + 1] = string.format("  %-20s %s (%s)", "Fan Speed:", tostring(parsed.fan_speed), parsed.fan_name)
-  lines[#lines + 1] = string.format("  %-20s %s (%s)", "Eco Mode:", tostring(parsed.eco_mode), parsed.eco_name)
-  if parsed.nanoe ~= nil then
-    lines[#lines + 1] = string.format("  %-20s %s", "Nanoe:", tostring(parsed.nanoe))
+  lines[#lines + 1] = string.format("  %-22s %s", "Power:", parsed.power and "ON" or "OFF")
+  lines[#lines + 1] = string.format("  %-22s %s °C", "Target Temp:", tostring(parsed.target_temp or "-"))
+  lines[#lines + 1] = string.format("  %-22s %s °C", "Inside Temp:", tostring(parsed.inside_temp or "-"))
+  lines[#lines + 1] = string.format("  %-22s %s °C", "Outside Temp:", tostring(parsed.outside_temp or "-"))
+  lines[#lines + 1] = string.format("  %-22s %s (%s)", "Mode:", tostring(parsed.mode), parsed.mode_name)
+  lines[#lines + 1] = string.format("  %-22s %s (%s)", "Fan Speed:", tostring(parsed.fan_speed), parsed.fan_name)
+  lines[#lines + 1] = string.format("  %-22s %s (%s)", "Eco Mode:", tostring(parsed.eco_mode), parsed.eco_name)
+  lines[#lines + 1] = string.format("  %-22s %s (%s)", "Vertical Swing (UD):", tostring(parsed.air_swing_ud), parsed.air_swing_ud_name)
+  lines[#lines + 1] = string.format("  %-22s %s (%s)", "Horizontal Swing (LR):", tostring(parsed.air_swing_lr), parsed.air_swing_lr_name)
+  
+  if parsed.nanoe ~= nil then lines[#lines + 1] = string.format("  %-22s %s", "Nanoe:", tostring(parsed.nanoe)) end
+  if parsed.eco_navi ~= nil then lines[#lines + 1] = string.format("  %-22s %s", "EcoNavi:", tostring(parsed.eco_navi)) end
+  if parsed.iauto_x ~= nil then lines[#lines + 1] = string.format("  %-22s %s", "iAuto-X / AI ECO:", tostring(parsed.iauto_x)) end
+  if parsed.inside_cleaning ~= nil then lines[#lines + 1] = string.format("  %-22s %s", "Inside Cleaning:", tostring(parsed.inside_cleaning)) end
+
+  -- Zones
+  if next(parsed.zones) ~= nil then
+    lines[#lines + 1] = "  -- Zones --"
+    for zid, z in pairs(parsed.zones) do
+      lines[#lines + 1] = string.format("  Zone %d (%-12s): %s | Damper: %3d%% | Temp: %s °C",
+        zid, z.name, z.power and "ON " or "OFF", z.damper, tostring(z.temperature or "-"))
+    end
   end
-  lines[#lines + 1] = "----------------------------------"
+
+  -- Energy
+  if energy then
+    lines[#lines + 1] = "  -- Energy & Power --"
+    lines[#lines + 1] = string.format("  %-22s %.2f kWh", "Today's Consumption:", energy.consumption)
+    lines[#lines + 1] = string.format("  %-22s %.2f kWh", "Heating Consumption:", energy.heating_rate)
+    lines[#lines + 1] = string.format("  %-22s %.2f kWh", "Cooling Consumption:", energy.cooling_rate)
+    lines[#lines + 1] = string.format("  %-22s %d W", "Extrapolated Power:", energy.current_power_w or 0)
+  end
+
+  lines[#lines + 1] = "--------------------------------------------------"
   log(table.concat(lines, "\n"))
 end
 
@@ -706,39 +945,50 @@ function P.Resident_Poll(config)
     return
   end
 
+  -- Optional Energy Fetch (if configured in objects/params or enabled)
+  local energy = nil
+  if config.enable_energy ~= false and (config.cbus_energy or config.cbus_params) then
+    energy = P.GetEnergy(guid, dbg)
+  end
+
   local objects = config.cbus_objects or {}
 
-  -- 1. Sync Power (Boolean 01.001)
-  if objects.power and status.power ~= nil then
-    safeSetGroup(objects.power, status.power, dbg)
+  -- 1. Sync Core Climate
+  if objects.power and status.power ~= nil then safeSetGroup(objects.power, status.power, dbg) end
+  if objects.target_temp and status.target_temp ~= nil then safeSetGroup(objects.target_temp, status.target_temp, dbg) end
+  if objects.inside_temp and status.inside_temp ~= nil then safeSetGroup(objects.inside_temp, status.inside_temp, dbg) end
+  if objects.outside_temp and status.outside_temp ~= nil then safeSetGroup(objects.outside_temp, status.outside_temp, dbg) end
+  if objects.mode and status.mode ~= nil then safeSetGroup(objects.mode, status.mode, dbg) end
+  if objects.fan_speed and status.fan_speed ~= nil then safeSetGroup(objects.fan_speed, status.fan_speed, dbg) end
+  if objects.eco_mode and status.eco_mode ~= nil then safeSetGroup(objects.eco_mode, status.eco_mode, dbg) end
+  if objects.air_swing_ud and status.air_swing_ud ~= nil then safeSetGroup(objects.air_swing_ud, status.air_swing_ud, dbg) end
+  if objects.air_swing_lr and status.air_swing_lr ~= nil then safeSetGroup(objects.air_swing_lr, status.air_swing_lr, dbg) end
+  if objects.nanoe and status.nanoe ~= nil then safeSetGroup(objects.nanoe, status.nanoe, dbg) end
+  if objects.eco_navi and status.eco_navi ~= nil then safeSetGroup(objects.eco_navi, status.eco_navi, dbg) end
+  if objects.iauto_x and status.iauto_x ~= nil then safeSetGroup(objects.iauto_x, status.iauto_x, dbg) end
+  if objects.inside_cleaning and status.inside_cleaning ~= nil then safeSetGroup(objects.inside_cleaning, status.inside_cleaning, dbg) end
+
+  -- 2. Sync Zones (cbus_zones = { [1] = { power = "1/2/1", damper = "1/2/11", temp = "1/2/21" }, ... })
+  local zone_map = config.cbus_zones or {}
+  for zid, zconf in pairs(zone_map) do
+    local zdata = status.zones[tonumber(zid)]
+    if zdata then
+      if zconf.power and zdata.power ~= nil then safeSetGroup(zconf.power, zdata.power, dbg) end
+      if zconf.damper and zdata.damper ~= nil then safeSetGroup(zconf.damper, zdata.damper, dbg) end
+      if zconf.temp and zdata.temperature ~= nil then safeSetGroup(zconf.temp, zdata.temperature, dbg) end
+    end
   end
 
-  -- 2. Sync Temperatures (2-byte float 09.001)
-  if objects.target_temp and status.target_temp ~= nil then
-    safeSetGroup(objects.target_temp, status.target_temp, dbg)
-  end
-  if objects.inside_temp and status.inside_temp ~= nil then
-    safeSetGroup(objects.inside_temp, status.inside_temp, dbg)
-  end
-  if objects.outside_temp and status.outside_temp ~= nil then
-    safeSetGroup(objects.outside_temp, status.outside_temp, dbg)
+  -- 3. Sync Energy Objects
+  local energy_objects = config.cbus_energy or {}
+  if energy then
+    if energy_objects.daily_kwh and energy.consumption ~= nil then safeSetGroup(energy_objects.daily_kwh, energy.consumption, dbg) end
+    if energy_objects.heating_kwh and energy.heating_rate ~= nil then safeSetGroup(energy_objects.heating_kwh, energy.heating_rate, dbg) end
+    if energy_objects.cooling_kwh and energy.cooling_rate ~= nil then safeSetGroup(energy_objects.cooling_kwh, energy.cooling_rate, dbg) end
+    if energy_objects.current_power_w and energy.current_power_w ~= nil then safeSetGroup(energy_objects.current_power_w, energy.current_power_w, dbg) end
   end
 
-  -- 3. Sync Mode & Speeds (1-byte uint 05.010)
-  if objects.mode and status.mode ~= nil then
-    safeSetGroup(objects.mode, status.mode, dbg)
-  end
-  if objects.fan_speed and status.fan_speed ~= nil then
-    safeSetGroup(objects.fan_speed, status.fan_speed, dbg)
-  end
-  if objects.eco_mode and status.eco_mode ~= nil then
-    safeSetGroup(objects.eco_mode, status.eco_mode, dbg)
-  end
-  if objects.nanoe and status.nanoe ~= nil then
-    safeSetGroup(objects.nanoe, status.nanoe, dbg)
-  end
-
-  -- 4. Sync UserParams (if configured)
+  -- 4. Sync UserParams
   local params = config.cbus_params or {}
   if params.power then safeSetUserParam(CBUS_NETWORK, params.power, status.power and 1 or 0, dbg) end
   if params.target_temp then safeSetUserParam(CBUS_NETWORK, params.target_temp, status.target_temp, dbg) end
@@ -747,10 +997,12 @@ function P.Resident_Poll(config)
   if params.mode_name then safeSetUserParam(CBUS_NETWORK, params.mode_name, status.mode_name, dbg) end
   if params.fan_name then safeSetUserParam(CBUS_NETWORK, params.fan_name, status.fan_name, dbg) end
   if params.eco_name then safeSetUserParam(CBUS_NETWORK, params.eco_name, status.eco_name, dbg) end
+  if energy and params.daily_kwh then safeSetUserParam(CBUS_NETWORK, params.daily_kwh, energy.consumption, dbg) end
+  if energy and params.current_power_w then safeSetUserParam(CBUS_NETWORK, params.current_power_w, energy.current_power_w, dbg) end
 
   -- 5. Debug output
   if dbg then
-    printDebugTable(status)
+    printDebugTable(status, energy)
   end
 end
 
@@ -772,49 +1024,62 @@ function P.Event_Control(config, dst_addr, val)
 
   local dbg = isDebuggingEnabled()
   local objects = config.cbus_objects or {}
+  local zone_map = config.cbus_zones or {}
   local params = {}
 
-  -- Power (Boolean or Level)
+  -- 1. Check Core Climate Controls
   if dst_addr == objects.power then
     params.operate = (val == true or val == 1 or val == 255) and 1 or 0
-
-  -- Target Temperature (16.0 - 30.0)
   elseif dst_addr == objects.target_temp then
     local t = extractNumber(val)
-    if t then
-      params.temperatureSet = clamp(t, MIN_TARGET_TEMP, MAX_TARGET_TEMP)
-    end
-
-  -- Operation Mode (0-4)
+    if t then params.temperatureSet = clamp(t, MIN_TARGET_TEMP, MAX_TARGET_TEMP) end
   elseif dst_addr == objects.mode then
     local m = extractNumber(val)
-    if m and m >= 0 and m <= 4 then
-      params.operationMode = m
-    end
-
-  -- Fan Speed (0-5)
+    if m and m >= 0 and m <= 4 then params.operationMode = m end
   elseif dst_addr == objects.fan_speed then
     local s = extractNumber(val)
-    if s and s >= 0 and s <= 5 then
-      params.fanSpeed = s
-    end
-
-  -- Eco / Preset Mode (0-2)
+    if s and s >= 0 and s <= 5 then params.fanSpeed = s end
   elseif dst_addr == objects.eco_mode then
     local e = extractNumber(val)
-    if e and e >= 0 and e <= 2 then
-      params.ecoMode = e
-    end
-
-  -- Nanoe Mode (0-4)
+    if e and e >= 0 and e <= 2 then params.ecoMode = e end
+  elseif dst_addr == objects.air_swing_ud then
+    local u = extractNumber(val)
+    if u and u >= -1 and u <= 5 then params.airSwingUD = u end
+  elseif dst_addr == objects.air_swing_lr then
+    local l = extractNumber(val)
+    if l and l >= -1 and l <= 5 then params.airSwingLR = l end
   elseif dst_addr == objects.nanoe then
     local n = extractNumber(val)
-    if n and n >= 0 and n <= 4 then
-      params.nanoe = n
+    if n and n >= 0 and n <= 4 then params.nanoe = n end
+  elseif dst_addr == objects.eco_navi then
+    local en = extractNumber(val)
+    if en and en >= 0 and en <= 2 then params.ecoNavi = en end
+  elseif dst_addr == objects.iauto_x then
+    local ia = extractNumber(val)
+    if ia and ia >= 0 and ia <= 2 then params.iAutoX = ia end
+  elseif dst_addr == objects.inside_cleaning then
+    local ic = extractNumber(val)
+    if ic and ic >= 0 and ic <= 1 then params.insideCleaning = ic end
+  end
+
+  -- 2. Check Zone Controls
+  for zid, zconf in pairs(zone_map) do
+    if dst_addr == zconf.power then
+      local z_power = (val == true or val == 1 or val == 255) and 1 or 0
+      debuglog(string.format("Dispatching Zone %d Power change: %d", zid, z_power), dbg)
+      P.ControlZone(guid, zid, z_power, nil, dbg)
+      return
+    elseif dst_addr == zconf.damper then
+      local z_damper = extractNumber(val)
+      if z_damper then
+        debuglog(string.format("Dispatching Zone %d Damper change: %d%%", zid, z_damper), dbg)
+        P.ControlZone(guid, zid, nil, z_damper, dbg)
+        return
+      end
     end
   end
 
-  -- Dispatch if matched
+  -- 3. Dispatch Core Climate if matched
   if next(params) ~= nil then
     debuglog("Dispatching event change for " .. tostring(dst_addr) .. ": " .. json.encode(params), dbg)
     P.ControlDevice(guid, params, dbg)

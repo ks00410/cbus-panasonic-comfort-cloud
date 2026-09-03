@@ -1,7 +1,8 @@
 --[[
   Resident Polling Script for Panasonic Comfort Cloud AC
   Script Type: Resident Script (Sleep interval: 60 seconds)
-  Description: Periodically polls live AC status and writes values to C-Bus group addresses.
+  Description: Periodically polls live AC status, zone dampers, and energy telemetry,
+               writing values to C-Bus group addresses.
                Credentials & Device GUID are automatically read from user.secrets.
 --]]
 
@@ -12,21 +13,62 @@ local config = {
   -- (Optional) If omitted, device_guid will be loaded automatically from user.secrets
   -- device_guid = "YOUR_DEVICE_GUID",
 
+  -- 1. Core Climate Objects
   cbus_objects = {
-    power        = "1/1/1",  -- 01.001 Switch (0 = Off, 1 = On)
-    target_temp  = "1/1/2",  -- 09.001 2-byte float (e.g. 23.0)
-    inside_temp  = "1/1/3",  -- 09.001 2-byte float (e.g. 21.5)
-    outside_temp = "1/1/4",  -- 09.001 2-byte float (e.g. 18.0)
-    mode         = "1/1/5",  -- 05.010 1-byte unsigned (0=Auto, 1=Dry, 2=Cool, 3=Heat, 4=Fan)
-    fan_speed    = "1/1/6",  -- 05.010 1-byte unsigned (0=Auto, 1=Low, 2=LowMid, 3=Mid, 4=HighMid, 5=High)
-    eco_mode     = "1/1/7"   -- 05.010 1-byte unsigned (0=Auto, 1=Powerful, 2=Quiet)
+    power           = "1/1/1",  -- 01.001 Switch (0 = Off, 1 = On)
+    target_temp     = "1/1/2",  -- 09.001 2-byte float (e.g. 23.0)
+    inside_temp     = "1/1/3",  -- 09.001 2-byte float (e.g. 21.5)
+    outside_temp    = "1/1/4",  -- 09.001 2-byte float (e.g. 18.0)
+    mode            = "1/1/5",  -- 05.010 1-byte unsigned (0=Auto, 1=Dry, 2=Cool, 3=Heat, 4=Fan)
+    fan_speed       = "1/1/6",  -- 05.010 1-byte unsigned (0=Auto, 1=Low, 2=LowMid, 3=Mid, 4=HighMid, 5=High)
+    eco_mode        = "1/1/7",  -- 05.010 1-byte unsigned (0=Auto, 1=Powerful, 2=Quiet)
+    air_swing_ud    = "1/1/8",  -- 05.010 1-byte unsigned / signed (-1=Auto, 0=Up, 1=Down, 2=Mid, 5=Swing)
+    air_swing_lr    = "1/1/9",  -- 05.010 1-byte unsigned / signed (-1=Auto, 0=Right, 1=Left, 2=Mid)
+    nanoe           = "1/1/10", -- 05.010 1-byte unsigned (0=Off, 2=On, 3=ModeG, 4=All)
+    eco_navi        = "1/1/11", -- 01.001 Switch (0=Off, 2=On)
+    iauto_x         = "1/1/12", -- 01.001 Switch (0=Off, 2=On)
+    inside_cleaning = "1/1/13"  -- 01.001 Switch (0=Off, 1=On)
   },
 
-  -- (Optional) Map to named C-Bus UserParams if defined in your C-Bus project
+  -- 2. Zone Damper Controls (Optional — for ducted systems with zone controllers)
+  cbus_zones = {
+    [1] = {
+      power  = "1/2/1",   -- 01.001 Switch (Zone 1 On/Off)
+      damper = "1/2/11",  -- 05.001 Scaling 0..100% (Damper Position)
+      temp   = "1/2/21"   -- 09.001 2-byte float (Zone 1 Temp, if sensor fitted)
+    },
+    [2] = {
+      power  = "1/2/2",   -- 01.001 Switch (Zone 2 On/Off)
+      damper = "1/2/12",  -- 05.001 Scaling 0..100% (Damper Position)
+      temp   = "1/2/22"   -- 09.001 2-byte float (Zone 2 Temp, if sensor fitted)
+    },
+    [3] = {
+      power  = "1/2/3",   -- 01.001 Switch (Zone 3 On/Off)
+      damper = "1/2/13",  -- 05.001 Scaling 0..100% (Damper Position)
+      temp   = "1/2/23"   -- 09.001 2-byte float (Zone 3 Temp, if sensor fitted)
+    },
+    [4] = {
+      power  = "1/2/4",   -- 01.001 Switch (Zone 4 On/Off)
+      damper = "1/2/14",  -- 05.001 Scaling 0..100% (Damper Position)
+      temp   = "1/2/24"   -- 09.001 2-byte float (Zone 4 Temp, if sensor fitted)
+    }
+  },
+
+  -- 3. Energy & Power Telemetry (Optional)
+  enable_energy = true,
+  cbus_energy = {
+    daily_kwh       = "1/3/1",  -- 14.056 4-byte float or 09.024 (Today's Total kWh)
+    heating_kwh     = "1/3/2",  -- 14.056 4-byte float (Today's Heating kWh)
+    cooling_kwh     = "1/3/3",  -- 14.056 4-byte float (Today's Cooling kWh)
+    current_power_w = "1/3/4"   -- 14.056 4-byte float / 07.012 (Extrapolated Watts)
+  },
+
+  -- 4. C-Bus UserParams (Optional)
   cbus_params = {
     -- power       = "AC_Living_Power",
     -- inside_temp = "AC_Living_InsideTemp",
-    -- target_temp = "AC_Living_TargetTemp"
+    -- target_temp = "AC_Living_TargetTemp",
+    -- daily_kwh   = "AC_Living_DailyKWh"
   }
 }
 
