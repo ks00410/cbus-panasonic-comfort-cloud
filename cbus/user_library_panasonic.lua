@@ -501,6 +501,51 @@ local function getAccHeaders(session, include_client_id)
   return headers
 end
 
+-- Auto-accept Panasonic Terms & Privacy Agreements (resolves Error 412)
+function P.AcceptAgreements(session, dbg)
+  debuglog("Auto-accepting updated Panasonic Terms & Privacy Agreements...", dbg)
+  local headers = getAccHeaders(session, false)
+
+  -- 1. Fetch available agreement documents
+  local doc_code, doc_resp = httpRequest("GET", BASE_PATH_ACC .. "/auth/v2/agreement/documents?language=0", nil, headers, dbg)
+  if doc_code ~= 200 or not doc_resp or not doc_resp.agreementList then return false end
+
+  -- 2. Fetch currently accepted agreements
+  local stat_code, stat_resp = httpRequest("GET", BASE_PATH_ACC .. "/auth/v2/agreement/status", nil, headers, dbg)
+  local accepted_map = {}
+  if stat_code == 200 and stat_resp and stat_resp.agreementList then
+    for _, item in ipairs(stat_resp.agreementList) do
+      if item.type and item.version then
+        accepted_map[tonumber(item.type)] = tostring(item.version)
+      end
+    end
+  end
+
+  -- Types to auto-accept: 1 (Terms), 2 (Privacy), 4 (Cookie Policy)
+  local auto_types = { [1] = true, [2] = true, [4] = true }
+  local to_accept = {}
+
+  for _, doc in ipairs(doc_resp.agreementList) do
+    local dtype = tonumber(doc.type)
+    if dtype and auto_types[dtype] then
+      local latest_ver = tostring(doc.version or "")
+      if #latest_ver > 0 and accepted_map[dtype] ~= latest_ver then
+        table.insert(to_accept, { type = dtype, version = latest_ver })
+      end
+    end
+  end
+
+  if #to_accept > 0 then
+    local put_headers = getAccHeaders(session, false)
+    local put_code = httpRequest("PUT", BASE_PATH_ACC .. "/auth/v2/agreement/status", { agreementList = to_accept }, put_headers, dbg)
+    if put_code == 200 then
+      log("PANASONIC: Successfully accepted updated agreements.")
+      return true
+    end
+  end
+  return true
+end
+
 -- Refresh OAuth2 Access Token using Refresh Token
 function P.RefreshAccessToken(session, dbg)
   if not session or not session.refresh_token then
@@ -542,6 +587,13 @@ function P.RefreshAccessToken(session, dbg)
   if acc_code == 401 and acc_raw and acc_raw:find("4106") then
     log("PANASONIC: App version rejected (code 4106), dynamically discovering latest version...")
     fetchLatestAppVersionOnline(dbg)
+    login_headers = getAccHeaders(session, false)
+    acc_code, acc_resp, acc_raw = httpRequest("POST", BASE_PATH_ACC .. "/auth/v2/login", { language = 0 }, login_headers, dbg)
+  end
+
+  -- Auto-accept agreements if HTTP 412 returned on login
+  if acc_code == 412 then
+    P.AcceptAgreements(session, dbg)
     login_headers = getAccHeaders(session, false)
     acc_code, acc_resp = httpRequest("POST", BASE_PATH_ACC .. "/auth/v2/login", { language = 0 }, login_headers, dbg)
   end
@@ -613,6 +665,11 @@ local function executeAccRequest(method, path, payload, dbg)
       headers = getAccHeaders(session, true)
       code, resp, raw = httpRequest(method, url, payload, headers, dbg)
     end
+  -- If 412 Precondition Failed, auto-accept agreements and retry once
+  elseif code == 412 then
+    P.AcceptAgreements(session, dbg)
+    headers = getAccHeaders(session, true)
+    code, resp, raw = httpRequest(method, url, payload, headers, dbg)
   end
 
   return code, resp, raw
