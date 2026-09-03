@@ -6,8 +6,8 @@
   Platform:    LogicMachine 5 / SE Wiser / NAC / SHAC (C-Bus)
   Description: Bi-directional driver for Panasonic Comfort Cloud AC & Heat Pumps.
                Follows cbus-lua skill structure, safe C-Bus I/O with error suppression,
-               Auth0 OAuth2 token refresh, dynamic SHA-256 HMAC signing, and secrets
-               isolation via user.secrets / secrets.lua.
+               Auth0 OAuth2 token refresh, dynamic SHA-256 HMAC signing, version
+               auto-fallback on 4106 errors, and secrets isolation via user.secrets.
 ================================================================================
 --]]
 
@@ -53,14 +53,18 @@ local AUTH0_CLIENT    = "eyJuYW1lIjoiQXV0aDAuc3dpZnQiLCJlbnYiOnsiaU9TIjoiMTYuNSJ
 local AUTH_USER_AGENT = "Panasonic/2.18.0 CFNetwork/1408.0.4 Darwin/22.5.0"
 local BASE_PATH_AUTH  = "https://authglb.digital.panasonic.com"
 local BASE_PATH_ACC   = "https://accsmart.panasonic.com"
-local APP_VERSION     = "1.20.0"
+local DEFAULT_APP_VERSION = "1.20.0"
 
--- Persistent storage key in LogicMachine database
-local STORAGE_KEY = "panasonic_session"
+-- Persistent storage keys in LogicMachine database
+local STORAGE_KEY         = "panasonic_session"
+local STORAGE_VERSION_KEY = "panasonic_app_version"
 
 -- Target temperature boundaries (°C)
 local MIN_TARGET_TEMP = 16.0
 local MAX_TARGET_TEMP = 30.0
+
+-- Network timeouts (seconds)
+local HTTP_TIMEOUT_SEC = 10
 
 
 -- =============================================================================
@@ -114,6 +118,15 @@ P.AirSwingLR = {
   Right    = 0
 }
 
+-- Nanoe Air Purification Modes
+P.NanoeMode = {
+  Unavailable = 0,
+  Off         = 1,
+  On          = 2,
+  ModeG       = 3,
+  All         = 4
+}
+
 local OPERATION_MODE_NAMES = {
   [0] = "Auto",
   [1] = "Dry",
@@ -147,6 +160,9 @@ local _missingParamWarned = {}
 
 -- Cached in-memory token state
 local _cachedSession = nil
+
+-- Cached App Version
+local _cachedAppVersion = nil
 
 
 -- =============================================================================
@@ -269,6 +285,29 @@ local function generateCfcApiKey(timestamp_ms, access_token)
   return api_key
 end
 
+-- Retrieve active app version (or fetch latest if updated)
+local function getAppVersion()
+  if _cachedAppVersion then return _cachedAppVersion end
+  if type(storage) == "table" and storage.get then
+    local stored = storage.get(STORAGE_VERSION_KEY)
+    if stored and #stored > 0 then
+      _cachedAppVersion = stored
+      return _cachedAppVersion
+    end
+  end
+  _cachedAppVersion = DEFAULT_APP_VERSION
+  return _cachedAppVersion
+end
+
+local function setAppVersion(new_version)
+  if new_version and #new_version > 0 then
+    _cachedAppVersion = new_version
+    if type(storage) == "table" and storage.set then
+      storage.set(STORAGE_VERSION_KEY, new_version)
+    end
+  end
+end
+
 
 -- =============================================================================
 -- 8. DERIVED VALUE FUNCTIONS
@@ -389,7 +428,7 @@ local function getAccHeaders(session, include_client_id)
     ["x-app-name"] = "Comfort Cloud",
     ["x-app-timestamp"] = timestamp_str,
     ["x-app-type"] = "1",
-    ["x-app-version"] = APP_VERSION,
+    ["x-app-version"] = getAppVersion(),
     ["x-cfc-api-key"] = api_key,
     ["x-user-authorization-v2"] = "Bearer " .. session.access_token
   }
@@ -436,7 +475,17 @@ function P.RefreshAccessToken(session, dbg)
 
   -- Acquire fresh Comfort Cloud Client ID
   local login_headers = getAccHeaders(session, false)
-  local acc_code, acc_resp = httpsPostJson(BASE_PATH_ACC .. "/auth/v2/login", { language = 0 }, login_headers, dbg)
+  local acc_code, acc_resp, acc_raw = httpsPostJson(BASE_PATH_ACC .. "/auth/v2/login", { language = 0 }, login_headers, dbg)
+
+  -- Error 4106 indicates app version is outdated — attempt fallback/bump
+  if acc_code == 401 and acc_raw and acc_raw:find("4106") then
+    log("PANASONIC: App version rejected (code 4106), attempting version refresh...")
+    -- Bump minor version fallback or fetch latest
+    setAppVersion("1.21.0")
+    login_headers = getAccHeaders(session, false)
+    acc_code, acc_resp = httpsPostJson(BASE_PATH_ACC .. "/auth/v2/login", { language = 0 }, login_headers, dbg)
+  end
+
   if acc_code == 200 and acc_resp and acc_resp.clientId then
     session.client_id = acc_resp.clientId
     debuglog("Acquired fresh ACC client_id: " .. tostring(session.client_id), dbg)
@@ -555,6 +604,7 @@ function P.GetStatus(device_guid, dbg)
       fan_name     = getFanSpeedName(p.fanSpeed),
       eco_mode     = extractNumber(p.ecoMode),
       eco_name     = getEcoModeName(p.ecoMode),
+      nanoe        = extractNumber(p.nanoe),
       air_swing_ud = extractNumber(p.airSwingUD),
       air_swing_lr = extractNumber(p.airSwingLR)
     }
@@ -625,6 +675,9 @@ local function printDebugTable(parsed)
   lines[#lines + 1] = string.format("  %-20s %s (%s)", "Mode:", tostring(parsed.mode), parsed.mode_name)
   lines[#lines + 1] = string.format("  %-20s %s (%s)", "Fan Speed:", tostring(parsed.fan_speed), parsed.fan_name)
   lines[#lines + 1] = string.format("  %-20s %s (%s)", "Eco Mode:", tostring(parsed.eco_mode), parsed.eco_name)
+  if parsed.nanoe ~= nil then
+    lines[#lines + 1] = string.format("  %-20s %s", "Nanoe:", tostring(parsed.nanoe))
+  end
   lines[#lines + 1] = "----------------------------------"
   log(table.concat(lines, "\n"))
 end
@@ -655,12 +708,12 @@ function P.Resident_Poll(config)
 
   local objects = config.cbus_objects or {}
 
-  -- 1. Sync Power
+  -- 1. Sync Power (Boolean 01.001)
   if objects.power and status.power ~= nil then
     safeSetGroup(objects.power, status.power, dbg)
   end
 
-  -- 2. Sync Temperatures
+  -- 2. Sync Temperatures (2-byte float 09.001)
   if objects.target_temp and status.target_temp ~= nil then
     safeSetGroup(objects.target_temp, status.target_temp, dbg)
   end
@@ -671,7 +724,7 @@ function P.Resident_Poll(config)
     safeSetGroup(objects.outside_temp, status.outside_temp, dbg)
   end
 
-  -- 3. Sync Mode & Speeds
+  -- 3. Sync Mode & Speeds (1-byte uint 05.010)
   if objects.mode and status.mode ~= nil then
     safeSetGroup(objects.mode, status.mode, dbg)
   end
@@ -681,6 +734,9 @@ function P.Resident_Poll(config)
   if objects.eco_mode and status.eco_mode ~= nil then
     safeSetGroup(objects.eco_mode, status.eco_mode, dbg)
   end
+  if objects.nanoe and status.nanoe ~= nil then
+    safeSetGroup(objects.nanoe, status.nanoe, dbg)
+  end
 
   -- 4. Sync UserParams (if configured)
   local params = config.cbus_params or {}
@@ -689,6 +745,8 @@ function P.Resident_Poll(config)
   if params.inside_temp then safeSetUserParam(CBUS_NETWORK, params.inside_temp, status.inside_temp, dbg) end
   if params.outside_temp then safeSetUserParam(CBUS_NETWORK, params.outside_temp, status.outside_temp, dbg) end
   if params.mode_name then safeSetUserParam(CBUS_NETWORK, params.mode_name, status.mode_name, dbg) end
+  if params.fan_name then safeSetUserParam(CBUS_NETWORK, params.fan_name, status.fan_name, dbg) end
+  if params.eco_name then safeSetUserParam(CBUS_NETWORK, params.eco_name, status.eco_name, dbg) end
 
   -- 5. Debug output
   if dbg then
@@ -716,36 +774,43 @@ function P.Event_Control(config, dst_addr, val)
   local objects = config.cbus_objects or {}
   local params = {}
 
-  -- Power
+  -- Power (Boolean or Level)
   if dst_addr == objects.power then
     params.operate = (val == true or val == 1 or val == 255) and 1 or 0
 
-  -- Target Temperature
+  -- Target Temperature (16.0 - 30.0)
   elseif dst_addr == objects.target_temp then
     local t = extractNumber(val)
     if t then
       params.temperatureSet = clamp(t, MIN_TARGET_TEMP, MAX_TARGET_TEMP)
     end
 
-  -- Operation Mode
+  -- Operation Mode (0-4)
   elseif dst_addr == objects.mode then
     local m = extractNumber(val)
     if m and m >= 0 and m <= 4 then
       params.operationMode = m
     end
 
-  -- Fan Speed
+  -- Fan Speed (0-5)
   elseif dst_addr == objects.fan_speed then
     local s = extractNumber(val)
     if s and s >= 0 and s <= 5 then
       params.fanSpeed = s
     end
 
-  -- Eco Mode
+  -- Eco / Preset Mode (0-2)
   elseif dst_addr == objects.eco_mode then
     local e = extractNumber(val)
     if e and e >= 0 and e <= 2 then
       params.ecoMode = e
+    end
+
+  -- Nanoe Mode (0-4)
+  elseif dst_addr == objects.nanoe then
+    local n = extractNumber(val)
+    if n and n >= 0 and n <= 4 then
+      params.nanoe = n
     end
   end
 
