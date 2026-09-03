@@ -77,37 +77,50 @@ Since LogicMachine runs headless without a terminal interface for interactive 2F
 3. Paste the contents of [`cbus/user_library_panasonic.lua`](cbus/user_library_panasonic.lua).
 4. Save.
 
-#### Step C: Create C-Bus Group Addresses
-Create group addresses in your LogicMachine (e.g. under application `56` Lighting / HVAC):
+#### Step C: C-Bus User Parameters (C-Bus Native Architecture)
+The integration automatically updates **C-Bus UserParams** (on C-Bus Network 0) matching the standard C-Bus Lua naming conventions:
 
-##### 1. Core Climate
-| Function | C-Bus Group Example | Data Type (DPT) | Description |
-| :--- | :--- | :--- | :--- |
-| **Power** | `1/1/1` | `01.001 Switch` | `0` = Off, `1` = On |
-| **Target Temp** | `1/1/2` | `09.001 2-byte float` | Target setpoint (16.0 – 30.0 °C) |
-| **Inside Temp** | `1/1/3` | `09.001 2-byte float` | Current indoor temperature |
-| **Outside Temp**| `1/1/4` | `09.001 2-byte float` | Outdoor temperature |
-| **Mode** | `1/1/5` | `05.010 1-byte uint` | `0`=Auto, `1`=Dry, `2`=Cool, `3`=Heat, `4`=Fan |
-| **Fan Speed** | `1/1/6` | `05.010 1-byte uint` | `0`=Auto, `1`=Low, `2`=LowMid, `3`=Mid, `4`=HighMid, `5`=High |
-| **Eco Mode** | `1/1/7` | `05.010 1-byte uint` | `0`=Auto, `1`=Powerful, `2`=Quiet |
-| **Air Swing UD**| `1/1/8` | `05.010 1-byte uint` | `-1`=Auto, `0`=Up, `1`=Down, `2`=Mid, `5`=Swing |
-| **Air Swing LR**| `1/1/9` | `05.010 1-byte uint` | `-1`=Auto, `0`=Right, `1`=Left, `2`=Mid |
-| **Nanoe** | `1/1/10`| `05.010 1-byte uint` | `0`=Off, `2`=On, `3`=ModeG, `4`=All |
+##### 1. Core Climate UserParams
+| UserParam Name | Data Type | Description |
+| :--- | :--- | :--- |
+| `AC_Power` | Integer / Boolean | `0` = Off, `1` = On |
+| `AC_TargetTemp` | Float (°C) | Target setpoint (16.0 – 30.0 °C) |
+| `AC_InsideTemp` | Float (°C) | Current indoor room temperature |
+| `AC_OutsideTemp`| Float (°C) | Outdoor ambient temperature |
+| `AC_Mode` | Integer | `0`=Auto, `1`=Dry, `2`=Cool, `3`=Heat, `4`=Fan |
+| `AC_Mode_Text` | String | `"Auto"`, `"Dry"`, `"Cool"`, `"Heat"`, `"Fan"` |
+| `AC_HVACAction` | Integer | `0`=Off, `1`=Idle, `2`=Heating, `3`=Cooling, `4`=Drying, `5`=Fan |
+| `AC_HVACAction_Text` | String | `"Off"`, `"Idle"`, `"Heating"`, `"Cooling"`, `"Drying"`, `"Fan Only"` |
+| `AC_FanSpeed` | Integer | `0`=Auto, `1`=Low, `2`=LowMid, `3`=Mid, `4`=HighMid, `5`=High |
+| `AC_FanSpeed_Text` | String | `"Auto"`, `"Low"`, `"Mid"`, `"High"`, etc. |
+| `AC_EcoMode` | Integer | `0`=Auto, `1`=Powerful, `2`=Quiet |
+| `AC_SwingUD` | Integer | `-1`=Auto, `0`=Up, `1`=Down, `2`=Mid, `5`=Swing |
+| `AC_SwingLR` | Integer | `-1`=Auto, `0`=Right, `1`=Left, `2`=Mid |
+| `AC_Nanoe` | Integer | `0`=Off, `2`=On, `3`=ModeG, `4`=All |
+| `AC_ActiveZones`| Integer | Count of open zones (`0`..`3`) |
+| `AC_LastUpdated`| String | Timestamp formatted as `"DD Mon YYYY, HH:MM"` |
 
-##### 2. Zone Controls (For ducted systems)
-| Function | C-Bus Group Example | Data Type (DPT) | Description |
-| :--- | :--- | :--- | :--- |
-| **Zone 1 Power** | `1/2/1` | `01.001 Switch` | Zone 1 Damper Open (`1`) / Closed (`0`) |
-| **Zone 1 Damper**| `1/2/11` | `05.001 Scaling` | Zone 1 Damper position `0%` – `100%` |
-| **Zone 1 Temp** | `1/2/21` | `09.001 2-byte float` | Zone 1 Room Temp (if sensor installed) |
+##### 2. Zone Damper UserParams
+| UserParam Name | Data Type | Description |
+| :--- | :--- | :--- |
+| `AC_Zone1_Power` | Integer | Zone 1 Damper Open (`1`) / Closed (`0`) |
+| `AC_Zone1_Damper`| Integer (%) | Zone 1 Damper aperture (`0` – `100%`) |
+| `AC_Zone1_Temp` | Float (°C) | Zone 1 Room Temp (if sensor installed) |
+| `AC_Zone2_Power` | Integer | Zone 2 Damper Open (`1`) / Closed (`0`) |
+| `AC_Zone2_Damper`| Integer (%) | Zone 2 Damper aperture (`0` – `100%`) |
+| `AC_Zone3_Power` | Integer | Zone 3 Damper Open (`1`) / Closed (`0`) |
+| `AC_Zone3_Damper`| Integer (%) | Zone 3 Damper aperture (`0` – `100%`) |
 
-##### 3. Energy & Power Monitoring
-| Function | C-Bus Group Example | Data Type (DPT) | Description |
-| :--- | :--- | :--- | :--- |
-| **Today's Energy** | `1/3/1` | `14.056 4-byte float` | Total daily energy consumption (kWh) |
-| **Heating Energy** | `1/3/2` | `14.056 4-byte float` | Daily heating energy (kWh) |
-| **Cooling Energy** | `1/3/3` | `14.056 4-byte float` | Daily cooling energy (kWh) |
-| **Current Power** | `1/3/4` | `14.056 4-byte float` | Instantaneous extrapolated power (Watts) |
+##### 3. Energy & Power Monitoring UserParams
+| UserParam Name | Data Type | Description |
+| :--- | :--- | :--- |
+| `AC_Daily_kWh` | Float (kWh) | Total daily energy consumption (kWh) |
+| `AC_Heating_kWh` | Float (kWh) | Today's heating energy (kWh) |
+| `AC_Cooling_kWh` | Float (kWh) | Today's cooling energy (kWh) |
+| `AC_CurrentPower_W` | Integer (Watts) | Instantaneous extrapolated power (Watts) |
+
+*(Optional)* Create a C-Bus UserParam named `Panasonic_Debug` (Boolean) to toggle detailed logs on/off directly from C-Bus.
+*(Optional)* You can also map native C-Bus group addresses (integers 0..255 on App 56) in `cbus_objects` if you want physical C-Bus buttons to track status.
 
 *(Optional)* Create a C-Bus UserParam named `Panasonic_Debug` (Boolean) to toggle detailed logs on/off directly from C-Bus.
 

@@ -176,20 +176,28 @@ local function safeSetUserParam(network, name, value, debugEnabled)
   end
 end
 
--- Safe write for Group Address — silently skips nil; checks for updates before writing
+-- Safe write for C-Bus Group Address (e.g., Integer 0..255 or string "1/1/1")
 local function safeSetGroup(addr, value, debugEnabled)
   if addr == nil or value == nil then return end
+
+  -- Native C-Bus group helper
+  if type(SetCBusLevel) == "function" and type(addr) == "number" then
+    local lvl = value
+    if type(value) == "boolean" then
+      lvl = value and 255 or 0
+    elseif type(value) == "number" then
+      lvl = clamp(math.floor(value + 0.5), 0, 255)
+    end
+    pcall(SetCBusLevel, CBUS_NETWORK, 56, addr, lvl, 0)
+    return
+  end
+
+  -- LogicMachine object helper
   if type(grp) == "table" and grp.checkupdate then
     local ok, err = pcall(grp.checkupdate, addr, value)
     if not ok and debugEnabled then
       debuglog("Failed grp.checkupdate on " .. tostring(addr) .. ": " .. tostring(err), debugEnabled)
     end
-  elseif type(SetCBusLevel) == "function" then
-    local lvl = value
-    if type(value) == "boolean" then
-      lvl = value and 255 or 0
-    end
-    pcall(SetCBusLevel, CBUS_NETWORK, 56, addr, lvl, 0)
   end
 end
 
@@ -911,18 +919,60 @@ function P.Resident_Poll(config)
     if energy_objects.current_power_w and energy.current_power_w ~= nil then safeSetGroup(energy_objects.current_power_w, energy.current_power_w, dbg) end
   end
 
-  -- 4. Sync UserParams
+  -- 4. Sync UserParams (C-Bus parameters pattern)
+  local pfx = config.param_prefix or "AC_"
+  local net = config.cbus_network or CBUS_NETWORK
+
+  -- Core climate UserParams
+  safeSetUserParam(net, pfx .. "Power", status.power and 1 or 0, dbg)
+  safeSetUserParam(net, pfx .. "TargetTemp", status.target_temp, dbg)
+  safeSetUserParam(net, pfx .. "InsideTemp", status.inside_temp, dbg)
+  safeSetUserParam(net, pfx .. "OutsideTemp", status.outside_temp, dbg)
+  safeSetUserParam(net, pfx .. "Mode", status.mode, dbg)
+  safeSetUserParam(net, pfx .. "Mode_Text", status.mode_name, dbg)
+  safeSetUserParam(net, pfx .. "FanSpeed", status.fan_speed, dbg)
+  safeSetUserParam(net, pfx .. "FanSpeed_Text", status.fan_name, dbg)
+  safeSetUserParam(net, pfx .. "EcoMode", status.eco_mode, dbg)
+  safeSetUserParam(net, pfx .. "EcoMode_Text", status.eco_name, dbg)
+  safeSetUserParam(net, pfx .. "SwingUD", status.air_swing_ud, dbg)
+  safeSetUserParam(net, pfx .. "SwingUD_Text", status.air_swing_ud_name, dbg)
+  safeSetUserParam(net, pfx .. "SwingLR", status.air_swing_lr, dbg)
+  safeSetUserParam(net, pfx .. "SwingLR_Text", status.air_swing_lr_name, dbg)
+  safeSetUserParam(net, pfx .. "Nanoe", status.nanoe, dbg)
+  safeSetUserParam(net, pfx .. "HVACAction", status.hvac_action, dbg)
+  safeSetUserParam(net, pfx .. "HVACAction_Text", status.hvac_action_name, dbg)
+  safeSetUserParam(net, pfx .. "ActiveZones", status.active_zones_count, dbg)
+  safeSetUserParam(net, pfx .. "LastUpdated", os.date("%d %b %Y, %H:%M"), dbg)
+
+  -- Zone UserParams
+  for zid, zdata in pairs(status.zones) do
+    safeSetUserParam(net, string.format("%sZone%d_Power", pfx, zid), zdata.power and 1 or 0, dbg)
+    safeSetUserParam(net, string.format("%sZone%d_Damper", pfx, zid), zdata.damper, dbg)
+    if zdata.temperature then
+      safeSetUserParam(net, string.format("%sZone%d_Temp", pfx, zid), zdata.temperature, dbg)
+    end
+  end
+
+  -- Energy UserParams
+  if energy then
+    safeSetUserParam(net, pfx .. "Daily_kWh", energy.consumption, dbg)
+    safeSetUserParam(net, pfx .. "Heating_kWh", energy.heating_rate, dbg)
+    safeSetUserParam(net, pfx .. "Cooling_kWh", energy.cooling_rate, dbg)
+    safeSetUserParam(net, pfx .. "CurrentPower_W", energy.current_power_w, dbg)
+  end
+
+  -- Explicit custom UserParam mappings (if supplied)
   local params = config.cbus_params or {}
-  if params.power then safeSetUserParam(CBUS_NETWORK, params.power, status.power and 1 or 0, dbg) end
-  if params.target_temp then safeSetUserParam(CBUS_NETWORK, params.target_temp, status.target_temp, dbg) end
-  if params.inside_temp then safeSetUserParam(CBUS_NETWORK, params.inside_temp, status.inside_temp, dbg) end
-  if params.outside_temp then safeSetUserParam(CBUS_NETWORK, params.outside_temp, status.outside_temp, dbg) end
-  if params.mode_name then safeSetUserParam(CBUS_NETWORK, params.mode_name, status.mode_name, dbg) end
-  if params.fan_name then safeSetUserParam(CBUS_NETWORK, params.fan_name, status.fan_name, dbg) end
-  if params.eco_name then safeSetUserParam(CBUS_NETWORK, params.eco_name, status.eco_name, dbg) end
-  if params.hvac_action_name then safeSetUserParam(CBUS_NETWORK, params.hvac_action_name, status.hvac_action_name, dbg) end
-  if energy and params.daily_kwh then safeSetUserParam(CBUS_NETWORK, params.daily_kwh, energy.consumption, dbg) end
-  if energy and params.current_power_w then safeSetUserParam(CBUS_NETWORK, params.current_power_w, energy.current_power_w, dbg) end
+  if params.power then safeSetUserParam(net, params.power, status.power and 1 or 0, dbg) end
+  if params.target_temp then safeSetUserParam(net, params.target_temp, status.target_temp, dbg) end
+  if params.inside_temp then safeSetUserParam(net, params.inside_temp, status.inside_temp, dbg) end
+  if params.outside_temp then safeSetUserParam(net, params.outside_temp, status.outside_temp, dbg) end
+  if params.mode_name then safeSetUserParam(net, params.mode_name, status.mode_name, dbg) end
+  if params.fan_name then safeSetUserParam(net, params.fan_name, status.fan_name, dbg) end
+  if params.eco_name then safeSetUserParam(net, params.eco_name, status.eco_name, dbg) end
+  if params.hvac_action_name then safeSetUserParam(net, params.hvac_action_name, status.hvac_action_name, dbg) end
+  if energy and params.daily_kwh then safeSetUserParam(net, params.daily_kwh, energy.consumption, dbg) end
+  if energy and params.current_power_w then safeSetUserParam(net, params.current_power_w, energy.current_power_w, dbg) end
 
   -- 5. Debug output
   if dbg then
@@ -931,7 +981,8 @@ function P.Resident_Poll(config)
 end
 
 -- Event Control entry point: Call from LogicMachine Event Script
-function P.Event_Control(config, dst_addr, val)
+-- Supports C-Bus Group Addresses (integers 0..255 or strings), UserParam names, or event table
+function P.Event_Control(config, dst_target, val)
   config = config or {}
   local guid = config.device_guid
   if not guid or #guid == 0 then
@@ -944,69 +995,70 @@ function P.Event_Control(config, dst_addr, val)
     return
   end
 
+  -- Support calling with event object directly: P.Event_Control(config, event)
+  local target = dst_target
+  local raw_val = val
+  if type(target) == "table" and target.dst then
+    raw_val = target.getvalue and target.getvalue() or target.value
+    target = target.dst
+  end
+
   local dbg = isDebuggingEnabled()
   local objects = config.cbus_objects or {}
   local zone_map = config.cbus_zones or {}
+  local pfx = config.param_prefix or "AC_"
   local params = {}
 
-  -- 1. Check Core Climate Controls
-  if dst_addr == objects.power then
-    params.operate = (val == true or val == 1 or val == 255) and 1 or 0
-  elseif dst_addr == objects.target_temp then
-    local t = extractNumber(val)
+  -- 1. Check Core Climate Controls (Group Addresses or UserParam names)
+  if target == objects.power or target == (pfx .. "Power") then
+    params.operate = (raw_val == true or raw_val == 1 or raw_val == 255) and 1 or 0
+  elseif target == objects.target_temp or target == (pfx .. "TargetTemp") then
+    local t = extractNumber(raw_val)
     if t then params.temperatureSet = clamp(t, MIN_TARGET_TEMP, MAX_TARGET_TEMP) end
-  elseif dst_addr == objects.mode then
-    local m = extractNumber(val)
+  elseif target == objects.mode or target == (pfx .. "Mode") then
+    local m = extractNumber(raw_val)
     if m and m >= 0 and m <= 4 then params.operationMode = m end
-  elseif dst_addr == objects.fan_speed then
-    local s = extractNumber(val)
+  elseif target == objects.fan_speed or target == (pfx .. "FanSpeed") then
+    local s = extractNumber(raw_val)
     if s and s >= 0 and s <= 5 then params.fanSpeed = s end
-  elseif dst_addr == objects.eco_mode then
-    local e = extractNumber(val)
+  elseif target == objects.eco_mode or target == (pfx .. "EcoMode") then
+    local e = extractNumber(raw_val)
     if e and e >= 0 and e <= 2 then params.ecoMode = e end
-  elseif dst_addr == objects.air_swing_ud then
-    local u = extractNumber(val)
+  elseif target == objects.air_swing_ud or target == (pfx .. "SwingUD") then
+    local u = extractNumber(raw_val)
     if u and u >= -1 and u <= 5 then
       params.airSwingUD = u
-      if u == -1 then
-        params.fanAutoMode = 2 -- AirSwingUD Auto
-      else
-        params.fanAutoMode = 1 -- Disabled
-      end
+      params.fanAutoMode = (u == -1) and 2 or 1
     end
-  elseif dst_addr == objects.air_swing_lr then
-    local l = extractNumber(val)
+  elseif target == objects.air_swing_lr or target == (pfx .. "SwingLR") then
+    local l = extractNumber(raw_val)
     if l and l >= -1 and l <= 5 then
       params.airSwingLR = l
-      if l == -1 then
-        params.fanAutoMode = 3 -- AirSwingLR Auto
-      else
-        params.fanAutoMode = 1 -- Disabled
-      end
+      params.fanAutoMode = (l == -1) and 3 or 1
     end
-  elseif dst_addr == objects.nanoe then
-    local n = extractNumber(val)
+  elseif target == objects.nanoe or target == (pfx .. "Nanoe") then
+    local n = extractNumber(raw_val)
     if n and n >= 0 and n <= 4 then params.nanoe = n end
-  elseif dst_addr == objects.eco_navi then
-    local en = extractNumber(val)
+  elseif target == objects.eco_navi or target == (pfx .. "EcoNavi") then
+    local en = extractNumber(raw_val)
     if en and en >= 0 and en <= 2 then params.ecoNavi = en end
-  elseif dst_addr == objects.iauto_x then
-    local ia = extractNumber(val)
+  elseif target == objects.iauto_x or target == (pfx .. "IAutoX") then
+    local ia = extractNumber(raw_val)
     if ia and ia >= 0 and ia <= 2 then params.iAutoX = ia end
-  elseif dst_addr == objects.inside_cleaning then
-    local ic = extractNumber(val)
+  elseif target == objects.inside_cleaning or target == (pfx .. "InsideCleaning") then
+    local ic = extractNumber(raw_val)
     if ic and ic >= 0 and ic <= 1 then params.insideCleaning = ic end
   end
 
-  -- 2. Check Zone Controls
+  -- 2. Check Zone Controls (Group Addresses or Zone UserParams)
   for zid, zconf in pairs(zone_map) do
-    if dst_addr == zconf.power then
-      local z_power = (val == true or val == 1 or val == 255) and 1 or 0
+    if target == zconf.power or target == string.format("%sZone%d_Power", pfx, zid) then
+      local z_power = (raw_val == true or raw_val == 1 or raw_val == 255) and 1 or 0
       debuglog(string.format("Dispatching Zone %d Power change: %d", zid, z_power), dbg)
       P.ControlZone(guid, zid, z_power, nil, dbg)
       return
-    elseif dst_addr == zconf.damper then
-      local z_damper = extractNumber(val)
+    elseif target == zconf.damper or target == string.format("%sZone%d_Damper", pfx, zid) then
+      local z_damper = extractNumber(raw_val)
       if z_damper then
         debuglog(string.format("Dispatching Zone %d Damper change: %d%%", zid, z_damper), dbg)
         P.ControlZone(guid, zid, nil, z_damper, dbg)
@@ -1017,7 +1069,7 @@ function P.Event_Control(config, dst_addr, val)
 
   -- 3. Dispatch Core Climate if matched
   if next(params) ~= nil then
-    debuglog("Dispatching event change for " .. tostring(dst_addr) .. ": " .. json.encode(params), dbg)
+    debuglog("Dispatching event change for " .. tostring(target) .. ": " .. json.encode(params), dbg)
     P.ControlDevice(guid, params, dbg)
   end
 end
