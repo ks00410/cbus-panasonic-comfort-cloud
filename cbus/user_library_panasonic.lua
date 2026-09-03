@@ -57,9 +57,9 @@ local CBUS_NETWORK = 0
 local DEBUG_PARAM = "Debug"
 
 -- Panasonic Client Constants (Public client configuration)
-local APP_CLIENT_ID       = "X3n9Xyc118pkd73PChweC4w87Wnc1ids"
-local AUTH0_CLIENT        = "eyJuYW1lIjoiQXV0aDAuc3dpZnQiLCJlbnYiOnsiaU9TIjoiMTYuNSJ9LCJ2ZXJzaW9uIjoiMi41LjAifQ=="
-local AUTH_USER_AGENT     = "Panasonic/2.18.0 CFNetwork/1408.0.4 Darwin/22.5.0"
+local APP_CLIENT_ID       = "Xmy6xIYIitMxngjB2rHvlm6HSDNnaMJx"
+local AUTH0_CLIENT        = "eyJuYW1lIjoiQXV0aDAuQW5kcm9pZCIsImVudiI6eyJhbmRyb2lkIjoiMzAifSwidmVyc2lvbiI6IjIuOS4zIn0="
+local AUTH_USER_AGENT     = "okhttp/4.10.0"
 local BASE_PATH_AUTH      = "https://authglb.digital.panasonic.com"
 local BASE_PATH_ACC       = "https://accsmart.panasonic.com"
 local DEFAULT_APP_VERSION = "4.4.0"
@@ -210,10 +210,17 @@ end
 
 -- Load secrets from the 'secrets' user library
 local function loadSecrets()
+  -- 1. Check global table 'secrets' (e.g. if instantiated or required in script)
   if type(secrets) == "table" and secrets.panasonic then
     return secrets.panasonic
   end
+  -- 2. Check require("user.secrets")
   local ok, mod = pcall(require, "user.secrets")
+  if ok and type(mod) == "table" and mod.panasonic then
+    return mod.panasonic
+  end
+  -- 3. Check require("secrets") (LogicMachine user library direct name)
+  ok, mod = pcall(require, "secrets")
   if ok and type(mod) == "table" and mod.panasonic then
     return mod.panasonic
   end
