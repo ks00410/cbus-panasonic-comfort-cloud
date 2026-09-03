@@ -1044,14 +1044,36 @@ function P.Event_Control(config, dst_target, val)
     if ic and ic >= 0 and ic <= 1 then params.insideCleaning = ic end
   end
 
-  -- 2. Check Zone Controls (Group Addresses or Zone UserParams)
+  -- 2. Check Zone Controls
+  -- 2a. Dynamic pattern matching for any Zone UserParam: AC_Zone<N>_Power or AC_Zone<N>_Damper
+  if type(target) == "string" then
+    local zid_power = target:match("^" .. pfx .. "Zone(%d+)_Power$")
+    if zid_power then
+      local z_power = (raw_val == true or raw_val == 1 or raw_val == 255) and 1 or 0
+      debuglog(string.format("Dispatching Zone %s Power change: %d", zid_power, z_power), dbg)
+      P.ControlZone(guid, tonumber(zid_power), z_power, nil, dbg)
+      return
+    end
+
+    local zid_damper = target:match("^" .. pfx .. "Zone(%d+)_Damper$")
+    if zid_damper then
+      local z_damper = extractNumber(raw_val)
+      if z_damper then
+        debuglog(string.format("Dispatching Zone %s Damper change: %d%%", zid_damper, z_damper), dbg)
+        P.ControlZone(guid, tonumber(zid_damper), nil, z_damper, dbg)
+        return
+      end
+    end
+  end
+
+  -- 2b. Mapped C-Bus Group Addresses in config.cbus_zones
   for zid, zconf in pairs(zone_map) do
-    if target == zconf.power or target == string.format("%sZone%d_Power", pfx, zid) then
+    if target == zconf.power then
       local z_power = (raw_val == true or raw_val == 1 or raw_val == 255) and 1 or 0
       debuglog(string.format("Dispatching Zone %d Power change: %d", zid, z_power), dbg)
       P.ControlZone(guid, zid, z_power, nil, dbg)
       return
-    elseif target == zconf.damper or target == string.format("%sZone%d_Damper", pfx, zid) then
+    elseif target == zconf.damper then
       local z_damper = extractNumber(raw_val)
       if z_damper then
         debuglog(string.format("Dispatching Zone %d Damper change: %d%%", zid, z_damper), dbg)
