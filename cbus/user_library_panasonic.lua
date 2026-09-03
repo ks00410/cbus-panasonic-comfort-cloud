@@ -54,7 +54,7 @@ panasonic = P   -- Global registration for C-Bus / LM execution environment
 local CBUS_NETWORK = 0
 
 -- UserParam name for toggling debug output (Boolean: true/false or 1/0)
-local DEBUG_PARAM = "Panasonic_Debug"
+local DEBUG_PARAM = "Debug"
 
 -- Panasonic Client Constants (Public client configuration)
 local APP_CLIENT_ID       = "X3n9Xyc118pkd73PChweC4w87Wnc1ids"
@@ -133,9 +133,11 @@ local _energyState = {}
 -- 5. LOGGING HELPERS
 -- =============================================================================
 
--- Check if debug logging is enabled via C-Bus UserParam or LM storage
-local function isDebuggingEnabled()
-  local ok, val = pcall(GetUserParam, CBUS_NETWORK, DEBUG_PARAM)
+-- Check if debug logging is enabled via C-Bus UserParam (matches Ecowitt / cbus-lua pattern)
+local function isDebuggingEnabled(network, custom_debug_param)
+  local net = network or CBUS_NETWORK
+  local param_name = custom_debug_param or DEBUG_PARAM
+  local ok, val = pcall(GetUserParam, net, param_name)
   if ok and val ~= nil then
     if type(val) == "boolean" then return val end
     if type(val) == "number" then return val ~= 0 end
@@ -206,23 +208,13 @@ end
 -- 7. UTILITY & SECRETS HELPERS
 -- =============================================================================
 
--- Load secrets safely from user.secrets or global secrets table
+-- Load secrets from the 'secrets' user library
 local function loadSecrets()
-  local sec = nil
-  if type(secrets) == "table" and secrets.panasonic then
-    sec = secrets.panasonic
-  else
-    local ok, mod = pcall(require, "user.secrets")
-    if ok and mod and mod.panasonic then
-      sec = mod.panasonic
-    else
-      ok, mod = pcall(require, "secrets")
-      if ok and mod and mod.panasonic then
-        sec = mod.panasonic
-      end
-    end
+  local ok, mod = pcall(require, "user.secrets")
+  if ok and mod and mod.panasonic then
+    return mod.panasonic
   end
-  return sec
+  return secrets and secrets.panasonic or nil
 end
 
 -- Extract numeric float/int from string or raw value
@@ -863,7 +855,8 @@ function P.Resident_Poll(config)
     return
   end
 
-  local dbg = isDebuggingEnabled()
+  local net = config.cbus_network or CBUS_NETWORK
+  local dbg = isDebuggingEnabled(net, config.debug_param)
   local status, err = P.GetStatus(guid, dbg)
   if not status then
     if err then log("PANASONIC Poll Error: " .. tostring(err)) end
@@ -1003,7 +996,8 @@ function P.Event_Control(config, dst_target, val)
     target = target.dst
   end
 
-  local dbg = isDebuggingEnabled()
+  local net = config.cbus_network or CBUS_NETWORK
+  local dbg = isDebuggingEnabled(net, config.debug_param)
   local objects = config.cbus_objects or {}
   local zone_map = config.cbus_zones or {}
   local pfx = config.param_prefix or "AC_"

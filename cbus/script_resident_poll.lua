@@ -23,8 +23,9 @@ local panasonic = require("user.panasonic")
 --   AC_Daily_kWh, AC_Heating_kWh, AC_Cooling_kWh, AC_CurrentPower_W
 --
 local config = {
-  cbus_network = 0,         -- C-Bus Network ID (Default: 0)
-  param_prefix = "AC_",     -- Prefix for C-Bus UserParams
+  cbus_network  = 0,        -- C-Bus Network ID (Default: 0)
+  param_prefix  = "AC_",    -- Prefix for C-Bus UserParams
+  debug_param   = "Debug",  -- C-Bus UserParam for debug toggle (Default: "Debug")
   enable_energy = true,     -- Fetch daily energy telemetry (kWh)
 
   -- (Optional) Map native C-Bus lighting / trigger Group Addresses (integers 0..255 or strings):

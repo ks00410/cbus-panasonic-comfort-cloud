@@ -119,10 +119,8 @@ The integration automatically updates **C-Bus UserParams** (on C-Bus Network 0) 
 | `AC_Cooling_kWh` | Float (kWh) | Today's cooling energy (kWh) |
 | `AC_CurrentPower_W` | Integer (Watts) | Instantaneous extrapolated power (Watts) |
 
-*(Optional)* Create a C-Bus UserParam named `Panasonic_Debug` (Boolean) to toggle detailed logs on/off directly from C-Bus.
+*(Optional)* Create a C-Bus UserParam named `Debug` (Boolean: `true`/`false` or `1`/`0`) to toggle detailed logs on/off directly from C-Bus, matching the Ecowitt integration convention.
 *(Optional)* You can also map native C-Bus group addresses (integers 0..255 on App 56) in `cbus_objects` if you want physical C-Bus buttons to track status.
-
-*(Optional)* Create a C-Bus UserParam named `Panasonic_Debug` (Boolean) to toggle detailed logs on/off directly from C-Bus.
 
 #### Step D: Create Resident Status Polling Script
 1. Go to **Scripting** $\rightarrow$ **Scripts** $\rightarrow$ **Add New Script**.
