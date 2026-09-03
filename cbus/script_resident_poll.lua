@@ -27,7 +27,9 @@ local config = {
     nanoe           = "1/1/10", -- 05.010 1-byte unsigned (0=Off, 2=On, 3=ModeG, 4=All)
     eco_navi        = "1/1/11", -- 01.001 Switch (0=Off, 2=On)
     iauto_x         = "1/1/12", -- 01.001 Switch (0=Off, 2=On)
-    inside_cleaning = "1/1/13"  -- 01.001 Switch (0=Off, 1=On)
+    inside_cleaning = "1/1/13", -- 01.001 Switch (0=Off, 1=On)
+    hvac_action     = "1/1/14", -- 05.010 1-byte unsigned (0=Off, 1=Idle, 2=Heating, 3=Cooling, 4=Drying, 5=Fan)
+    active_zones    = "1/1/15"  -- 05.010 1-byte unsigned (Count of active zones, e.g. 0..3)
   },
 
   -- 2. Zone Damper Controls (Optional — for ducted systems with zone controllers)

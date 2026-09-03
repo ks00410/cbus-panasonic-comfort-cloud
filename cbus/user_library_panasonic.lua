@@ -100,11 +100,16 @@ P.EcoNaviMode = { Unavailable = 0, Off = 1, On = 2 }
 P.IAutoXMode  = { Unavailable = 0, Off = 1, On = 2 }
 P.ZoneMode    = { Off = 0, On = 1 }
 
+-- HVAC Action (Computed from setpoint, ambient temp, and operation mode)
+-- 0 = Off, 1 = Idle, 2 = Heating, 3 = Cooling, 4 = Drying, 5 = Fan Only
+P.HVACAction = { Off = 0, Idle = 1, Heating = 2, Cooling = 3, Drying = 4, FanOnly = 5 }
+
 local OPERATION_MODE_NAMES = { [0] = "Auto", [1] = "Dry", [2] = "Cool", [3] = "Heat", [4] = "Fan" }
 local FAN_SPEED_NAMES      = { [0] = "Auto", [1] = "Low", [2] = "LowMid", [3] = "Mid", [4] = "HighMid", [5] = "High" }
 local ECO_MODE_NAMES       = { [0] = "Auto", [1] = "Powerful", [2] = "Quiet" }
 local AIR_SWING_UD_NAMES   = { [-1] = "Auto", [0] = "Up", [3] = "UpMid", [2] = "Mid", [4] = "DownMid", [1] = "Down", [5] = "Swing" }
 local AIR_SWING_LR_NAMES   = { [-1] = "Auto", [1] = "Left", [5] = "LeftMid", [2] = "Mid", [4] = "RightMid", [0] = "Right" }
+local HVAC_ACTION_NAMES    = { [0] = "Off", [1] = "Idle", [2] = "Heating", [3] = "Cooling", [4] = "Drying", [5] = "Fan Only" }
 
 
 -- =============================================================================
@@ -361,6 +366,33 @@ local function sanitizeTemperature(raw_val)
     return nil
   end
   return t
+end
+
+-- Calculate HVAC Action state:
+-- 0 = Off, 1 = Idle, 2 = Heating, 3 = Cooling, 4 = Drying, 5 = Fan Only
+local function calculateHVACAction(operate, mode, target_temp, inside_temp)
+  if operate ~= 1 then return 0 end -- Off
+  if mode == 1 then return 4 end    -- Drying
+  if mode == 4 then return 5 end    -- Fan Only
+
+  if not target_temp or not inside_temp then
+    if mode == 3 then return 2 end -- Heat
+    if mode == 2 then return 3 end -- Cool
+    return 1 -- Idle
+  end
+
+  if mode == 3 then -- Heat
+    return (target_temp > inside_temp) and 2 or 1
+  elseif mode == 2 then -- Cool
+    return (target_temp < inside_temp) and 3 or 1
+  elseif mode == 0 then -- Auto
+    local diff = target_temp - inside_temp
+    if diff >= 1.0 then return 2 end
+    if diff <= -1.0 then return 3 end
+    return 1
+  end
+
+  return 1 -- Idle
 end
 
 -- Calculate instantaneous power (Watts) extrapolated from energy reading diffs
@@ -680,19 +712,30 @@ function P.GetStatus(device_guid, dbg)
       inside_cleaning   = extractNumber(p.insideCleaning),
       air_quality       = extractNumber(p.airQuality),
       error_status      = extractNumber(p.errorStatus) or 0,
+      hvac_action       = 0,
+      hvac_action_name  = "Off",
+      active_zones_count = 0,
       timestamp         = resp.timestamp or os.time(),
       zones             = {}
     }
+
+    -- Calculate derived HVAC Action
+    parsed.hvac_action = calculateHVACAction(p.operate, parsed.mode, parsed.target_temp, parsed.inside_temp)
+    parsed.hvac_action_name = HVAC_ACTION_NAMES[parsed.hvac_action] or "Unknown"
 
     -- Parse Zone Parameters if ducted zoning is present
     if p.zoneParameters and type(p.zoneParameters) == "table" then
       for _, z in ipairs(p.zoneParameters) do
         local zid = extractNumber(z.zoneId)
         if zid then
+          local is_on = (z.zoneOnOff == 1)
+          if is_on then
+            parsed.active_zones_count = parsed.active_zones_count + 1
+          end
           parsed.zones[zid] = {
             id          = zid,
             name        = z.zoneName or ("Zone " .. tostring(zid)),
-            power       = (z.zoneOnOff == 1),
+            power       = is_on,
             damper      = extractNumber(z.zoneLevel) or 0,
             temperature = sanitizeTemperature(z.zoneTemperature),
             spill       = extractNumber(z.zoneSpill) or 0
@@ -768,6 +811,9 @@ local function printDebugTable(parsed, energy)
   lines[#lines + 1] = string.format("  %-22s %s (%s)", "Vertical Swing (UD):", tostring(parsed.air_swing_ud), parsed.air_swing_ud_name)
   lines[#lines + 1] = string.format("  %-22s %s (%s)", "Horizontal Swing (LR):", tostring(parsed.air_swing_lr), parsed.air_swing_lr_name)
   
+  lines[#lines + 1] = string.format("  %-22s %s (%s)", "HVAC Action:", tostring(parsed.hvac_action), parsed.hvac_action_name)
+  lines[#lines + 1] = string.format("  %-22s %d", "Active Zones Count:", parsed.active_zones_count or 0)
+  
   if parsed.nanoe ~= nil then lines[#lines + 1] = string.format("  %-22s %s", "Nanoe:", tostring(parsed.nanoe)) end
   if parsed.eco_navi ~= nil then lines[#lines + 1] = string.format("  %-22s %s", "EcoNavi:", tostring(parsed.eco_navi)) end
   if parsed.iauto_x ~= nil then lines[#lines + 1] = string.format("  %-22s %s", "iAuto-X / AI ECO:", tostring(parsed.iauto_x)) end
@@ -838,6 +884,12 @@ function P.Resident_Poll(config)
   if objects.eco_navi and status.eco_navi ~= nil then safeSetGroup(objects.eco_navi, status.eco_navi, dbg) end
   if objects.iauto_x and status.iauto_x ~= nil then safeSetGroup(objects.iauto_x, status.iauto_x, dbg) end
   if objects.inside_cleaning and status.inside_cleaning ~= nil then safeSetGroup(objects.inside_cleaning, status.inside_cleaning, dbg) end
+  if (objects.hvac_action or objects.action) and status.hvac_action ~= nil then
+    safeSetGroup(objects.hvac_action or objects.action, status.hvac_action, dbg)
+  end
+  if (objects.active_zones_count or objects.active_zones) and status.active_zones_count ~= nil then
+    safeSetGroup(objects.active_zones_count or objects.active_zones, status.active_zones_count, dbg)
+  end
 
   -- 2. Sync Zones
   local zone_map = config.cbus_zones or {}
@@ -868,6 +920,7 @@ function P.Resident_Poll(config)
   if params.mode_name then safeSetUserParam(CBUS_NETWORK, params.mode_name, status.mode_name, dbg) end
   if params.fan_name then safeSetUserParam(CBUS_NETWORK, params.fan_name, status.fan_name, dbg) end
   if params.eco_name then safeSetUserParam(CBUS_NETWORK, params.eco_name, status.eco_name, dbg) end
+  if params.hvac_action_name then safeSetUserParam(CBUS_NETWORK, params.hvac_action_name, status.hvac_action_name, dbg) end
   if energy and params.daily_kwh then safeSetUserParam(CBUS_NETWORK, params.daily_kwh, energy.consumption, dbg) end
   if energy and params.current_power_w then safeSetUserParam(CBUS_NETWORK, params.current_power_w, energy.current_power_w, dbg) end
 
