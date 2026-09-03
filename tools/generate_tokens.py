@@ -151,7 +151,7 @@ async def main():
         access_token = settings.access_token
         client_id = settings.clientId
         scope = settings.scope or "openid offline_access comfortcloud.control a2w.control"
-        app_ver_str = await app_ver.get() or "1.20.0"
+        app_ver_str = await app_ver.get() or "4.4.0"
 
         if not refresh_token:
             print("\nError: Failed to obtain a refresh token.")

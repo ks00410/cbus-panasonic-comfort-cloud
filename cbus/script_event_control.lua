@@ -41,10 +41,6 @@ local config = {
     [3] = {
       power  = "1/2/3",   -- 01.001 Switch (Zone 3 On/Off)
       damper = "1/2/13"   -- 05.001 Scaling 0..100% (Damper Position)
-    },
-    [4] = {
-      power  = "1/2/4",   -- 01.001 Switch (Zone 4 On/Off)
-      damper = "1/2/14"   -- 05.001 Scaling 0..100% (Damper Position)
     }
   }
 }

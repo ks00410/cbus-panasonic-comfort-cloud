@@ -62,7 +62,7 @@ local AUTH0_CLIENT        = "eyJuYW1lIjoiQXV0aDAuc3dpZnQiLCJlbnYiOnsiaU9TIjoiMTY
 local AUTH_USER_AGENT     = "Panasonic/2.18.0 CFNetwork/1408.0.4 Darwin/22.5.0"
 local BASE_PATH_AUTH      = "https://authglb.digital.panasonic.com"
 local BASE_PATH_ACC       = "https://accsmart.panasonic.com"
-local DEFAULT_APP_VERSION = "1.20.0"
+local DEFAULT_APP_VERSION = "4.4.0"
 
 -- Persistent storage keys in LogicMachine database
 local STORAGE_KEY         = "panasonic_session"
@@ -236,6 +236,14 @@ local function getLocalTimezoneOffset()
   local sign = (diff_sec >= 0) and "+" or "-"
   diff_sec = math.abs(diff_sec)
   return string.format("%s%02d:%02d", sign, math.floor(diff_sec / 3600), math.floor((diff_sec % 3600) / 60))
+end
+
+-- URL encoding helper for device GUIDs containing '+' or other symbols
+local function urlEncode(str)
+  if str == nil then return "" end
+  return tostring(str):gsub("([^%w%-%_%.%~])", function(c)
+    return string.format("%%%02X", string.byte(c))
+  end)
 end
 
 -- Generate dynamic HMAC / SHA-256 signature key for Panasonic API requests
@@ -501,8 +509,12 @@ local function executeAccRequest(method, path, payload, dbg)
   local headers = getAccHeaders(session, true)
   local code, resp, raw = httpRequest(method, url, payload, headers, dbg)
 
-  -- If 401 Unauthorized, refresh token once and retry
+  -- If 401 Unauthorized, check for outdated app version (4106) or expired access token
   if code == 401 then
+    if raw and raw:find("4106") then
+      log("PANASONIC: App version rejected (code 4106), updating version...")
+      setAppVersion("4.4.0")
+    end
     session = P.RefreshAccessToken(session, dbg)
     if session then
       headers = getAccHeaders(session, true)
@@ -555,9 +567,12 @@ function P.GetEnergy(device_guid, dbg)
 
     for _, item in ipairs(resp.historyDataList) do
       if item.dataTime == today_str then
-        energy_result.consumption  = extractNumber(item.consumption) or 0.0
-        energy_result.heating_rate = extractNumber(item.heatConsumptionRate) or 0.0
-        energy_result.cooling_rate = extractNumber(item.coolConsumptionRate) or 0.0
+        local cons = extractNumber(item.consumption)
+        local heat = extractNumber(item.heatConsumptionRate)
+        local cool = extractNumber(item.coolConsumptionRate)
+        if cons and cons >= 0 then energy_result.consumption = cons end
+        if heat and heat >= 0 then energy_result.heating_rate = heat end
+        if cool and cool >= 0 then energy_result.cooling_rate = cool end
         break
       end
     end
@@ -578,7 +593,7 @@ function P.GetStatus(device_guid, dbg)
   end
   if not guid or #guid == 0 then return nil, "Device GUID is required" end
 
-  local code, resp = executeAccRequest("GET", "/deviceStatus/now/" .. tostring(guid), nil, dbg)
+  local code, resp = executeAccRequest("GET", "/deviceStatus/now/" .. urlEncode(guid), nil, dbg)
   if code == 200 and resp and resp.parameters then
     local p = resp.parameters
     local parsed = {
