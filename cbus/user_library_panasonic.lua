@@ -210,21 +210,11 @@ end
 
 -- Load secrets from the 'secrets' user library
 local function loadSecrets()
-  -- 1. Check global table 'secrets' (e.g. if instantiated or required in script)
-  if type(secrets) == "table" and secrets.panasonic then
-    return secrets.panasonic
-  end
-  -- 2. Check require("user.secrets")
   local ok, mod = pcall(require, "user.secrets")
-  if ok and type(mod) == "table" and mod.panasonic then
+  if ok and mod and mod.panasonic then
     return mod.panasonic
   end
-  -- 3. Check require("secrets") (LogicMachine user library direct name)
-  ok, mod = pcall(require, "secrets")
-  if ok and type(mod) == "table" and mod.panasonic then
-    return mod.panasonic
-  end
-  return nil
+  return secrets and secrets.panasonic or nil
 end
 
 -- Extract numeric float/int from string or raw value
