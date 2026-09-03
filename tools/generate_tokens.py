@@ -151,15 +151,13 @@ async def main():
 
         print("\nAuthentication successful!")
 
-        # Query discovered devices using direct API headers
-        devices_info = []
-        try:
+        # Build helper for signed requests
+        def get_auth_headers():
             now = datetime.datetime.now()
             timestamp_str = now.strftime("%Y-%m-%d %H:%M:%S")
             timestamp_ms = int(time.time() * 1000)
             api_key = generate_cfc_api_key(timestamp_ms, settings.access_token)
-
-            headers = {
+            return {
                 "accept": "application/json; charset=utf-8",
                 "content-type": "application/json",
                 "user-agent": "G-RAC",
@@ -172,7 +170,62 @@ async def main():
                 "x-client-id": settings.clientId or ""
             }
 
+        # Handle 412/41201 Terms & Agreements acceptance automatically
+        async def auto_accept_agreements():
+            try:
+                headers = get_auth_headers()
+                # 1. Fetch latest agreement documents
+                doc_url = "https://accsmart.panasonic.com/auth/v2/agreement/documents?language=0"
+                async with session.get(doc_url, headers=headers) as resp:
+                    if resp.status != 200:
+                        return
+                    docs_resp = await resp.json()
+                    documents = docs_resp.get("agreementList", [])
+
+                # 2. Fetch currently accepted agreements
+                status_url = "https://accsmart.panasonic.com/auth/v2/agreement/status"
+                async with session.get(status_url, headers=headers) as resp:
+                    if resp.status != 200:
+                        return
+                    status_resp = await resp.json()
+                    accepted = status_resp.get("agreementList", [])
+
+                accepted_versions = {item.get("type"): item.get("version") for item in accepted}
+                auto_accept_types = {1, 2, 4} # 1: Terms, 2: Privacy, 4: Cookie Policy
+
+                to_accept = []
+                for doc in documents:
+                    try:
+                        dtype = int(doc.get("type"))
+                    except (TypeError, ValueError):
+                        continue
+                    if dtype in auto_accept_types:
+                        latest_ver = doc.get("version")
+                        if latest_ver and accepted_versions.get(dtype) != latest_ver:
+                            to_accept.append({"type": dtype, "version": latest_ver})
+
+                if to_accept:
+                    print(f"\nAuto-accepting updated Panasonic Terms & Privacy Agreements: {to_accept} ...")
+                    async with session.put(status_url, headers=get_auth_headers(), json={"agreementList": to_accept}) as put_resp:
+                        if put_resp.status == 200:
+                            print("Agreements accepted successfully!")
+            except Exception as e:
+                print(f"Agreement auto-acceptance note: {e}")
+
+        # Check agreements
+        await auto_accept_agreements()
+
+        # Query discovered devices using direct API headers
+        devices_info = []
+        try:
+            headers = get_auth_headers()
             async with session.get("https://accsmart.panasonic.com/device/group", headers=headers) as resp:
+                if resp.status == 412:
+                    # Retry once after explicit agreement acceptance
+                    await auto_accept_agreements()
+                    async with session.get("https://accsmart.panasonic.com/device/group", headers=get_auth_headers()) as retry_resp:
+                        resp = retry_resp
+
                 if resp.status == 200:
                     group_data = await resp.json()
                     for group in group_data.get("groupList", []):
