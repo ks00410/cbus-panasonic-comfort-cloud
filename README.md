@@ -80,6 +80,12 @@ Since LogicMachine runs headless without a terminal interface for interactive 2F
 #### Step C: Create C-Bus User Parameters in LogicMachine / C-Bus
 Create the **User Parameters** you wish to use in your C-Bus project (under C-Bus Network 0). The script matches them by name (prefixed by `AC_`). You do not need to create all of them—only create the parameters you want to monitor or display on touchscreens:
 
+> **Note on Dynamic Zones & Parameter Creation:**
+> - C-Bus User Parameters **cannot** be created automatically at runtime; they must be added to your C-Bus project / LogicMachine before values will populate.
+> - The integration is **fully dynamic**: it handles systems with **0 zones** (single-split), **2 zones**, **3 zones**, **4 zones**, **8 zones**, or any other count returned by the Panasonic API.
+> - For multi-zone systems, create parameters following the `AC_Zone<N>_Power`, `AC_Zone<N>_Damper`, and `AC_Zone<N>_Temp` naming scheme for each zone number present on your AC.
+> - Any parameter that is not created in C-Bus is safely and silently ignored without raising errors.
+
 ##### 1. Core Climate UserParams
 | UserParam Name | Data Type | Description |
 | :--- | :--- | :--- |
@@ -97,10 +103,10 @@ Create the **User Parameters** you wish to use in your C-Bus project (under C-Bu
 | `AC_SwingUD` | Integer | `-1`=Auto, `0`=Up, `1`=Down, `2`=Mid, `5`=Swing |
 | `AC_SwingLR` | Integer | `-1`=Auto, `0`=Right, `1`=Left, `2`=Mid |
 | `AC_Nanoe` | Integer | `0`=Off, `2`=On, `3`=ModeG, `4`=All |
-| `AC_ActiveZones`| Integer | Count of open zones (`0`..`3`) |
+| `AC_ActiveZones`| Integer | Count of currently open zones (e.g. `0`..`N`) |
 | `AC_LastUpdated`| String | Timestamp formatted as `"DD Mon YYYY, HH:MM"` |
 
-##### 2. Zone Damper UserParams
+##### 2. Zone Damper UserParams (Dynamic Naming: Zone 1 to N)
 | UserParam Name | Data Type | Description |
 | :--- | :--- | :--- |
 | `AC_Zone1_Power` | Integer | Zone 1 Damper Open (`1`) / Closed (`0`) |
@@ -108,8 +114,13 @@ Create the **User Parameters** you wish to use in your C-Bus project (under C-Bu
 | `AC_Zone1_Temp` | Float (°C) | Zone 1 Room Temp (if sensor installed) |
 | `AC_Zone2_Power` | Integer | Zone 2 Damper Open (`1`) / Closed (`0`) |
 | `AC_Zone2_Damper`| Integer (%) | Zone 2 Damper aperture (`0` – `100%`) |
+| `AC_Zone2_Temp` | Float (°C) | Zone 2 Room Temp (if sensor installed) |
 | `AC_Zone3_Power` | Integer | Zone 3 Damper Open (`1`) / Closed (`0`) |
 | `AC_Zone3_Damper`| Integer (%) | Zone 3 Damper aperture (`0` – `100%`) |
+| `AC_Zone3_Temp` | Float (°C) | Zone 3 Room Temp (if sensor installed) |
+| `AC_Zone<N>_Power` | Integer | Zone *N* Damper Open (`1`) / Closed (`0`) (for 4+ zones) |
+| `AC_Zone<N>_Damper`| Integer (%) | Zone *N* Damper aperture (`0` – `100%`) (for 4+ zones) |
+| `AC_Zone<N>_Temp` | Float (°C) | Zone *N* Room Temp (if sensor installed) |
 
 ##### 3. Energy & Power Monitoring UserParams
 | UserParam Name | Data Type | Description |
