@@ -151,19 +151,41 @@ async def main():
 
         print("\nAuthentication successful!")
 
-        # Query discovered devices
-        api_client = ApiClient(settings, session, raw=True)
+        # Query discovered devices using direct API headers
         devices_info = []
         try:
-            devices = await api_client.get_devices()
-            if devices:
-                for d in devices:
-                    devices_info.append({
-                        "name": d.name,
-                        "guid": d.guid,
-                        "model": d.model,
-                        "group": d.group
-                    })
+            now = datetime.datetime.now()
+            timestamp_str = now.strftime("%Y-%m-%d %H:%M:%S")
+            timestamp_ms = int(time.time() * 1000)
+            api_key = generate_cfc_api_key(timestamp_ms, settings.access_token)
+
+            headers = {
+                "accept": "application/json; charset=utf-8",
+                "content-type": "application/json",
+                "user-agent": "G-RAC",
+                "x-app-name": "Comfort Cloud",
+                "x-app-timestamp": timestamp_str,
+                "x-app-type": "1",
+                "x-app-version": app_ver_str,
+                "x-cfc-api-key": api_key,
+                "x-user-authorization-v2": f"Bearer {settings.access_token}",
+                "x-client-id": settings.clientId or ""
+            }
+
+            async with session.get("https://accsmart.panasonic.com/device/group", headers=headers) as resp:
+                if resp.status == 200:
+                    group_data = await resp.json()
+                    for group in group_data.get("groupList", []):
+                        gname = group.get("groupName", "Default Group")
+                        dev_list = group.get("deviceList", []) or group.get("deviceIdList", [])
+                        for d in dev_list:
+                            if d and "deviceGuid" in d:
+                                devices_info.append({
+                                    "name": d.get("deviceName", "Panasonic AC"),
+                                    "guid": d.get("deviceGuid"),
+                                    "model": d.get("deviceModuleNumber", ""),
+                                    "group": gname
+                                })
         except Exception as e:
             print(f"Warning: Could not fetch device list: {e}")
 
