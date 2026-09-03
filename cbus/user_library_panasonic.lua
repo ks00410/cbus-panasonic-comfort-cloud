@@ -288,6 +288,67 @@ local function setAppVersion(new_version)
   end
 end
 
+-- Dynamically fetch the latest published version of Panasonic Comfort Cloud
+-- Primary: Official Apple App Store lookup API (clean JSON, no HTML scraping)
+-- Secondary: Google Play Store regex match
+local function fetchLatestAppVersionOnline(dbg)
+  debuglog("Querying online App Store for latest Comfort Cloud app version...", dbg)
+
+  -- 1. Query Apple App Store Lookup API (App ID: 1348640525)
+  local resp_body = {}
+  local res, code = https.request({
+    url = "https://itunes.apple.com/lookup?id=1348640525",
+    method = "GET",
+    headers = {
+      ["accept"] = "application/json",
+      ["user-agent"] = "Mozilla/5.0"
+    },
+    sink = ltn12.sink.table(resp_body)
+  })
+
+  if code == 200 then
+    local raw = table.concat(resp_body)
+    local ok, parsed = pcall(function() return json.pdecode(raw) or json.decode(raw) end)
+    if ok and parsed and parsed.results and parsed.results[1] and parsed.results[1].version then
+      local latest_ver = tostring(parsed.results[1].version):gsub("%s+", "")
+      debuglog("Discovered latest App Store version: " .. latest_ver, dbg)
+      setAppVersion(latest_ver)
+      return latest_ver
+    end
+  end
+
+  -- 2. Fallback: Google Play Store
+  resp_body = {}
+  res, code = https.request({
+    url = "https://play.google.com/store/apps/details?id=com.panasonic.ACCsmart",
+    method = "GET",
+    headers = { ["user-agent"] = "Mozilla/5.0" },
+    sink = ltn12.sink.table(resp_body)
+  })
+
+  if code == 200 then
+    local raw = table.concat(resp_body)
+    local match = raw:match('%["(%d+%.%d+%.%d+)"%]')
+    if match then
+      debuglog("Discovered latest Play Store version: " .. match, dbg)
+      setAppVersion(match)
+      return match
+    end
+  end
+
+  -- 3. Fallback: Increment minor version if online lookup failed
+  local curr = getAppVersion()
+  local maj, min, pat = curr:match("^(%d+)%.(%d+)%.?(%d*)$")
+  if maj and min then
+    local bumped = string.format("%s.%d.0", maj, tonumber(min) + 1)
+    debuglog("Online lookup failed; automatically bumped version to: " .. bumped, dbg)
+    setAppVersion(bumped)
+    return bumped
+  end
+
+  return curr
+end
+
 
 -- =============================================================================
 -- 8. DERIVED VALUE FUNCTIONS
@@ -445,10 +506,10 @@ function P.RefreshAccessToken(session, dbg)
   local login_headers = getAccHeaders(session, false)
   local acc_code, acc_resp, acc_raw = httpRequest("POST", BASE_PATH_ACC .. "/auth/v2/login", { language = 0 }, login_headers, dbg)
 
-  -- Error 4106 indicates app version is outdated — attempt fallback/bump
+  -- Error 4106 indicates app version is outdated — dynamically discover latest version
   if acc_code == 401 and acc_raw and acc_raw:find("4106") then
-    log("PANASONIC: App version rejected (code 4106), bumping version...")
-    setAppVersion("1.21.0")
+    log("PANASONIC: App version rejected (code 4106), dynamically discovering latest version...")
+    fetchLatestAppVersionOnline(dbg)
     login_headers = getAccHeaders(session, false)
     acc_code, acc_resp = httpRequest("POST", BASE_PATH_ACC .. "/auth/v2/login", { language = 0 }, login_headers, dbg)
   end
@@ -512,8 +573,8 @@ local function executeAccRequest(method, path, payload, dbg)
   -- If 401 Unauthorized, check for outdated app version (4106) or expired access token
   if code == 401 then
     if raw and raw:find("4106") then
-      log("PANASONIC: App version rejected (code 4106), updating version...")
-      setAppVersion("4.4.0")
+      log("PANASONIC: App version rejected (code 4106), dynamically discovering latest version...")
+      fetchLatestAppVersionOnline(dbg)
     end
     session = P.RefreshAccessToken(session, dbg)
     if session then
