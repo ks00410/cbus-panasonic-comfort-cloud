@@ -21,7 +21,7 @@ Integrate **Panasonic Comfort Cloud** air conditioners and heat pumps into Clips
 
 ```
 cbus-panasonic-comfort-cloud/
-├── logicmachine/
+├── cbus/
 │   ├── user_library_panasonic.lua   # Core driver module (user.panasonic)
 │   ├── secrets.example.lua          # Template for user.secrets module (DO NOT COMMIT SECRETS)
 │   ├── script_resident_poll.lua     # Resident polling script (syncs AC + Zones + Energy -> C-Bus)
@@ -68,13 +68,13 @@ Since LogicMachine runs headless without a terminal interface for interactive 2F
 #### Step A: Create User Library `user.secrets`
 1. Go to **LogicMachine** $\rightarrow$ **Scripting** $\rightarrow$ **User Libraries**.
 2. Click **Add New** $\rightarrow$ Name: `secrets`.
-3. Copy [`logicmachine/secrets.example.lua`](logicmachine/secrets.example.lua) and replace the placeholders with your generated tokens and device GUID.
+3. Copy [`cbus/secrets.example.lua`](cbus/secrets.example.lua) and replace the placeholders with your generated tokens and device GUID.
 4. Save.
 
 #### Step B: Create User Library `user.panasonic`
 1. Go to **LogicMachine** $\rightarrow$ **Scripting** $\rightarrow$ **User Libraries**.
 2. Click **Add New** $\rightarrow$ Name: `panasonic`.
-3. Paste the contents of [`logicmachine/user_library_panasonic.lua`](logicmachine/user_library_panasonic.lua).
+3. Paste the contents of [`cbus/user_library_panasonic.lua`](cbus/user_library_panasonic.lua).
 4. Save.
 
 #### Step C: Create C-Bus Group Addresses
@@ -115,14 +115,14 @@ Create group addresses in your LogicMachine (e.g. under application `56` Lightin
 1. Go to **Scripting** $\rightarrow$ **Scripts** $\rightarrow$ **Add New Script**.
 2. Type: **Resident script** (Sleep interval: `60` seconds).
 3. Name: `Panasonic AC - Poll Status`.
-4. Paste the contents of [`logicmachine/script_resident_poll.lua`](logicmachine/script_resident_poll.lua).
+4. Paste the contents of [`cbus/script_resident_poll.lua`](cbus/script_resident_poll.lua).
 5. Enable the script.
 
 #### Step E: Create Event Control Script
 1. Go to **Scripting** $\rightarrow$ **Scripts** $\rightarrow$ **Add New Script**.
 2. Type: **Event script**.
 3. Attach to the C-Bus group objects created in Step C.
-4. Paste the contents of [`logicmachine/script_event_control.lua`](logicmachine/script_event_control.lua).
+4. Paste the contents of [`cbus/script_event_control.lua`](cbus/script_event_control.lua).
 5. Enable the script.
 
 ---
