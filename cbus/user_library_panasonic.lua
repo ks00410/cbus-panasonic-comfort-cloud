@@ -371,8 +371,12 @@ end
 -- Build Comfort Cloud signed headers
 local function getAccHeaders(session, include_client_id)
   local now_sec = os.time()
-  local timestamp_str = os.date("!%Y-%m-%d %H:%M:%S", now_sec)
-  local timestamp_ms = now_sec * 1000
+  -- Local time representation without timezone suffix to match app convention
+  local timestamp_str = os.date("%Y-%m-%d %H:%M:%S", now_sec)
+  -- UTC timestamp in milliseconds for HMAC key component
+  local utc_date = os.date("!*t", now_sec)
+  local utc_sec = os.time(utc_date)
+  local timestamp_ms = utc_sec * 1000
 
   local api_key = generateCfcApiKey(timestamp_ms, session.access_token)
 

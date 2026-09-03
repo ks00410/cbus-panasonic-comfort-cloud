@@ -21,9 +21,18 @@ except ImportError:
     sys.exit(1)
 
 
-def generate_cfc_api_key(timestamp_ms: int, access_token: str) -> str:
-    raw_str = f"Comfort Cloud521325fb2dd486bf4831b47644317fca{timestamp_ms}Bearer {access_token}"
-    hex_hash = hashlib.sha256(raw_str.encode('utf-8')).hexdigest()
+def generate_cfc_api_key(timestamp: str, access_token: str) -> str:
+    date = datetime.datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
+    timestamp_ms = str(int(date.replace(tzinfo=datetime.timezone.utc).timestamp() * 1000))
+    components = [
+        "Comfort Cloud".encode("utf-8"),
+        "521325fb2dd486bf4831b47644317fca".encode("utf-8"),
+        timestamp_ms.encode("utf-8"),
+        "Bearer ".encode("utf-8"),
+        access_token.encode("utf-8")
+    ]
+    input_buffer = b"".join(components)
+    hex_hash = hashlib.sha256(input_buffer).hexdigest()
     return hex_hash[:9] + "cfc" + hex_hash[9:]
 
 
@@ -34,8 +43,7 @@ async def test_live_api_endpoints(session: aiohttp.ClientSession, settings: Pana
 
     now = datetime.datetime.now()
     timestamp_str = now.strftime("%Y-%m-%d %H:%M:%S")
-    timestamp_ms = int(time.time() * 1000)
-    api_key = generate_cfc_api_key(timestamp_ms, settings.access_token)
+    api_key = generate_cfc_api_key(timestamp_str, settings.access_token)
 
     headers = {
         "accept": "application/json; charset=utf-8",
@@ -155,9 +163,8 @@ async def main():
         def get_auth_headers():
             now = datetime.datetime.now()
             timestamp_str = now.strftime("%Y-%m-%d %H:%M:%S")
-            timestamp_ms = int(time.time() * 1000)
-            api_key = generate_cfc_api_key(timestamp_ms, settings.access_token)
-            return {
+            api_key = generate_cfc_api_key(timestamp_str, settings.access_token)
+            headers = {
                 "accept": "application/json; charset=utf-8",
                 "content-type": "application/json",
                 "user-agent": "G-RAC",
@@ -166,9 +173,11 @@ async def main():
                 "x-app-type": "1",
                 "x-app-version": app_ver_str,
                 "x-cfc-api-key": api_key,
-                "x-user-authorization-v2": f"Bearer {settings.access_token}",
-                "x-client-id": settings.clientId or ""
+                "x-user-authorization-v2": f"Bearer {settings.access_token}"
             }
+            if settings.clientId:
+                headers["x-client-id"] = settings.clientId
+            return headers
 
         # Handle 412/41201 Terms & Agreements acceptance automatically
         async def auto_accept_agreements():
