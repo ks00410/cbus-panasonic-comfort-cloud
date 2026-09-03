@@ -243,10 +243,12 @@ local function getLocalTimezoneOffset()
   return string.format("%s%02d:%02d", sign, math.floor(diff_sec / 3600), math.floor((diff_sec % 3600) / 60))
 end
 
--- URL encoding helper for device GUIDs containing '+' or other symbols
-local function urlEncode(str)
+-- Prepare and URL encode device GUIDs according to Panasonic API spec
+-- Replaces '/' with 'f' before standard URL encoding
+local function prepareDeviceGuid(str)
   if str == nil then return "" end
-  return tostring(str):gsub("([^%w%-%_%.%~])", function(c)
+  local clean = tostring(str):gsub("/", "f")
+  return clean:gsub("([^%w%-%_%.%~])", function(c)
     return string.format("%%%02X", string.byte(c))
   end)
 end
@@ -438,11 +440,11 @@ local function httpRequest(method, url, payload_table, extra_headers, dbg)
   local resp_body = {}
 
   local headers = {
-    ["accept"]     = "application/json; charset=utf-8",
-    ["user-agent"] = "G-RAC"
+    ["accept"]       = "application/json; charset=utf-8",
+    ["content-type"] = "application/json",
+    ["user-agent"]   = "G-RAC"
   }
   if req_body then
-    headers["content-type"] = "application/json"
     headers["content-length"] = tostring(#req_body)
   end
   if extra_headers then
@@ -755,7 +757,7 @@ function P.GetStatus(device_guid, dbg)
   end
   if not guid or #guid == 0 then return nil, "Device GUID is required" end
 
-  local code, resp = executeAccRequest("GET", "/deviceStatus/now/" .. urlEncode(guid), nil, dbg)
+  local code, resp = executeAccRequest("GET", "/deviceStatus/now/" .. prepareDeviceGuid(guid), nil, dbg)
   if code == 200 and resp and resp.parameters then
     local p = resp.parameters
     local parsed = {
