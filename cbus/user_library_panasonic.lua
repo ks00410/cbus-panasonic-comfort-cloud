@@ -56,18 +56,17 @@ local CBUS_NETWORK = 0
 -- UserParam name for toggling debug output (Boolean: true/false or 1/0)
 local DEBUG_PARAM = "Panasonic_Debug"
 
--- Panasonic Client Constants (Auth0 public client configuration)
-local APP_CLIENT_ID   = "X3n9Xyc118pkd73PChweC4w87Wnc1ids"
-local AUTH0_CLIENT    = "eyJuYW1lIjoiQXV0aDAuc3dpZnQiLCJlbnYiOnsiaU9TIjoiMTYuNSJ9LCJ2ZXJzaW9uIjoiMi41LjAifQ=="
-local AUTH_USER_AGENT = "Panasonic/2.18.0 CFNetwork/1408.0.4 Darwin/22.5.0"
-local BASE_PATH_AUTH  = "https://authglb.digital.panasonic.com"
-local BASE_PATH_ACC   = "https://accsmart.panasonic.com"
+-- Panasonic Client Constants (Public client configuration)
+local APP_CLIENT_ID       = "X3n9Xyc118pkd73PChweC4w87Wnc1ids"
+local AUTH0_CLIENT        = "eyJuYW1lIjoiQXV0aDAuc3dpZnQiLCJlbnYiOnsiaU9TIjoiMTYuNSJ9LCJ2ZXJzaW9uIjoiMi41LjAifQ=="
+local AUTH_USER_AGENT     = "Panasonic/2.18.0 CFNetwork/1408.0.4 Darwin/22.5.0"
+local BASE_PATH_AUTH      = "https://authglb.digital.panasonic.com"
+local BASE_PATH_ACC       = "https://accsmart.panasonic.com"
 local DEFAULT_APP_VERSION = "1.20.0"
 
 -- Persistent storage keys in LogicMachine database
 local STORAGE_KEY         = "panasonic_session"
 local STORAGE_VERSION_KEY = "panasonic_app_version"
-local STORAGE_ENERGY_KEY  = "panasonic_energy_cache"
 
 -- Target temperature boundaries (°C)
 local MIN_TARGET_TEMP = 16.0
@@ -79,122 +78,33 @@ local MAX_TARGET_TEMP = 30.0
 -- =============================================================================
 
 -- Operation Modes (0: Auto, 1: Dry, 2: Cool, 3: Heat, 4: Fan)
-P.OperationMode = {
-  Auto = 0,
-  Dry  = 1,
-  Cool = 2,
-  Heat = 3,
-  Fan  = 4
-}
+P.OperationMode = { Auto = 0, Dry = 1, Cool = 2, Heat = 3, Fan = 4 }
 
 -- Fan Speeds (0: Auto, 1: Low, 2: LowMid, 3: Mid, 4: HighMid, 5: High)
-P.FanSpeed = {
-  Auto    = 0,
-  Low     = 1,
-  LowMid  = 2,
-  Mid     = 3,
-  HighMid = 4,
-  High    = 5
-}
+P.FanSpeed = { Auto = 0, Low = 1, LowMid = 2, Mid = 3, HighMid = 4, High = 5 }
 
 -- Eco / Preset Modes (0: Auto, 1: Powerful, 2: Quiet)
-P.EcoMode = {
-  Auto     = 0,
-  Powerful = 1,
-  Quiet    = 2
-}
+P.EcoMode = { Auto = 0, Powerful = 1, Quiet = 2 }
 
 -- Vertical Air Swing (UD)
-P.AirSwingUD = {
-  Auto    = -1,
-  Up      = 0,
-  UpMid   = 3,
-  Mid     = 2,
-  DownMid = 4,
-  Down    = 1,
-  Swing   = 5
-}
+P.AirSwingUD = { Auto = -1, Up = 0, UpMid = 3, Mid = 2, DownMid = 4, Down = 1, Swing = 5 }
 
 -- Horizontal Air Swing (LR)
-P.AirSwingLR = {
-  Auto     = -1,
-  Left     = 1,
-  LeftMid  = 5,
-  Mid      = 2,
-  RightMid = 4,
-  Right    = 0
-}
+P.AirSwingLR = { Auto = -1, Left = 1, LeftMid = 5, Mid = 2, RightMid = 4, Right = 0 }
 
 -- Nanoe Air Purification Modes
-P.NanoeMode = {
-  Unavailable = 0,
-  Off         = 1,
-  On          = 2,
-  ModeG       = 3,
-  All         = 4
-}
+P.NanoeMode = { Unavailable = 0, Off = 1, On = 2, ModeG = 3, All = 4 }
 
--- EcoNavi Modes
-P.EcoNaviMode = {
-  Unavailable = 0,
-  Off         = 1,
-  On          = 2
-}
+-- EcoNavi / iAuto-X Modes
+P.EcoNaviMode = { Unavailable = 0, Off = 1, On = 2 }
+P.IAutoXMode  = { Unavailable = 0, Off = 1, On = 2 }
+P.ZoneMode    = { Off = 0, On = 1 }
 
--- iAuto-X / AI ECO Modes
-P.IAutoXMode = {
-  Unavailable = 0,
-  Off         = 1,
-  On          = 2
-}
-
--- Zone Modes
-P.ZoneMode = {
-  Off = 0,
-  On  = 1
-}
-
-local OPERATION_MODE_NAMES = {
-  [0] = "Auto",
-  [1] = "Dry",
-  [2] = "Cool",
-  [3] = "Heat",
-  [4] = "Fan"
-}
-
-local FAN_SPEED_NAMES = {
-  [0] = "Auto",
-  [1] = "Low",
-  [2] = "LowMid",
-  [3] = "Mid",
-  [4] = "HighMid",
-  [5] = "High"
-}
-
-local ECO_MODE_NAMES = {
-  [0] = "Auto",
-  [1] = "Powerful",
-  [2] = "Quiet"
-}
-
-local AIR_SWING_UD_NAMES = {
-  [-1] = "Auto",
-  [0]  = "Up",
-  [3]  = "UpMid",
-  [2]  = "Mid",
-  [4]  = "DownMid",
-  [1]  = "Down",
-  [5]  = "Swing"
-}
-
-local AIR_SWING_LR_NAMES = {
-  [-1] = "Auto",
-  [1]  = "Left",
-  [5]  = "LeftMid",
-  [2]  = "Mid",
-  [4]  = "RightMid",
-  [0]  = "Right"
-}
+local OPERATION_MODE_NAMES = { [0] = "Auto", [1] = "Dry", [2] = "Cool", [3] = "Heat", [4] = "Fan" }
+local FAN_SPEED_NAMES      = { [0] = "Auto", [1] = "Low", [2] = "LowMid", [3] = "Mid", [4] = "HighMid", [5] = "High" }
+local ECO_MODE_NAMES       = { [0] = "Auto", [1] = "Powerful", [2] = "Quiet" }
+local AIR_SWING_UD_NAMES   = { [-1] = "Auto", [0] = "Up", [3] = "UpMid", [2] = "Mid", [4] = "DownMid", [1] = "Down", [5] = "Swing" }
+local AIR_SWING_LR_NAMES   = { [-1] = "Auto", [1] = "Left", [5] = "LeftMid", [2] = "Mid", [4] = "RightMid", [0] = "Right" }
 
 
 -- =============================================================================
@@ -210,7 +120,7 @@ local _cachedSession = nil
 -- Cached App Version
 local _cachedAppVersion = nil
 
--- Energy extrapolation state: { last_consumption, last_time, last_power }
+-- Energy extrapolation state: { last_consumption, last_time, power }
 local _energyState = {}
 
 
@@ -317,16 +227,11 @@ end
 -- Format local timezone offset as "+HH:MM" or "-HH:MM"
 local function getLocalTimezoneOffset()
   local now = os.time()
-  local utc_date = os.date("!*t", now)
-  local local_date = os.date("*t", now)
-  local utc_sec = os.time(utc_date)
-  local local_sec = os.time(local_date)
-  local diff_sec = os.difftime(local_sec, utc_sec)
+  local utc_sec = os.time(os.date("!*t", now))
+  local diff_sec = os.difftime(now, utc_sec)
   local sign = (diff_sec >= 0) and "+" or "-"
   diff_sec = math.abs(diff_sec)
-  local hours = math.floor(diff_sec / 3600)
-  local mins = math.floor((diff_sec % 3600) / 60)
-  return string.format("%s%02d:%02d", sign, hours, mins)
+  return string.format("%s%02d:%02d", sign, math.floor(diff_sec / 3600), math.floor((diff_sec % 3600) / 60))
 end
 
 -- Generate dynamic HMAC / SHA-256 signature key for Panasonic API requests
@@ -345,8 +250,7 @@ local function generateCfcApiKey(timestamp_ms, access_token)
   end
 
   -- Insert "cfc" at character index 10 (1-based Lua string index)
-  local api_key = string.sub(hex_hash, 1, 9) .. "cfc" .. string.sub(hex_hash, 10)
-  return api_key
+  return string.sub(hex_hash, 1, 9) .. "cfc" .. string.sub(hex_hash, 10)
 end
 
 -- Retrieve active app version (or fetch latest if updated)
@@ -386,36 +290,6 @@ local function sanitizeTemperature(raw_val)
   return t
 end
 
--- Human readable mode name
-local function getModeName(mode_val)
-  local m = extractNumber(mode_val)
-  return m and OPERATION_MODE_NAMES[m] or "Unknown"
-end
-
--- Human readable fan speed name
-local function getFanSpeedName(speed_val)
-  local s = extractNumber(speed_val)
-  return s and FAN_SPEED_NAMES[s] or "Unknown"
-end
-
--- Human readable eco mode name
-local function getEcoModeName(eco_val)
-  local e = extractNumber(eco_val)
-  return e and ECO_MODE_NAMES[e] or "Unknown"
-end
-
--- Human readable vertical swing name
-local function getAirSwingUDName(ud_val)
-  local u = extractNumber(ud_val)
-  return u and AIR_SWING_UD_NAMES[u] or "Unknown"
-end
-
--- Human readable horizontal swing name
-local function getAirSwingLRName(lr_val)
-  local l = extractNumber(lr_val)
-  return l and AIR_SWING_LR_NAMES[l] or "Unknown"
-end
-
 -- Calculate instantaneous power (Watts) extrapolated from energy reading diffs
 local function calculateExtrapolatedPower(guid, current_energy_kwh)
   if current_energy_kwh == nil or current_energy_kwh < 0 then return nil end
@@ -424,11 +298,7 @@ local function calculateExtrapolatedPower(guid, current_energy_kwh)
   local state = _energyState[guid]
 
   if not state then
-    _energyState[guid] = {
-      last_consumption = current_energy_kwh,
-      last_time = now_sec,
-      power = 0
-    }
+    _energyState[guid] = { last_consumption = current_energy_kwh, last_time = now_sec, power = 0 }
     return 0
   end
 
@@ -441,13 +311,11 @@ local function calculateExtrapolatedPower(guid, current_energy_kwh)
   end
 
   if time_diff_hr > 0.001 and energy_diff_kwh > 0 then
-    -- Power (W) = (kWh / hours) * 1000
     local power_watts = (energy_diff_kwh / time_diff_hr) * 1000.0
     state.power = math.floor(power_watts + 0.5)
     state.last_consumption = current_energy_kwh
     state.last_time = now_sec
   elseif time_diff_hr > (25 * 60) then
-    -- If no energy delta after 25 minutes, assume unit is idle (0 W)
     state.power = 0
   end
 
@@ -459,33 +327,38 @@ end
 -- 9. HTTP FETCH & AUTHENTICATION
 -- =============================================================================
 
--- Internal HTTPS POST helper
-local function httpsPostJson(url, payload_table, extra_headers, dbg)
-  local req_body = json.encode(payload_table)
+-- Unified HTTPS JSON request engine
+local function httpRequest(method, url, payload_table, extra_headers, dbg)
+  local req_body = payload_table and json.encode(payload_table) or nil
   local resp_body = {}
 
   local headers = {
-    ["content-type"] = "application/json",
-    ["content-length"] = tostring(#req_body),
+    ["accept"]     = "application/json; charset=utf-8",
     ["user-agent"] = "G-RAC"
   }
-
+  if req_body then
+    headers["content-type"] = "application/json"
+    headers["content-length"] = tostring(#req_body)
+  end
   if extra_headers then
     for k, v in pairs(extra_headers) do headers[k] = v end
   end
 
-  debuglog("POST " .. url .. "\n  payload: " .. req_body, dbg)
+  debuglog(method .. " " .. url .. (req_body and ("\n  payload: " .. req_body) or ""), dbg)
 
-  local res, code, response_headers, status = https.request{
-    url = url,
-    method = "POST",
+  local req = {
+    url     = url,
+    method  = method,
     headers = headers,
-    source = ltn12.source.string(req_body),
-    sink = ltn12.sink.table(resp_body)
+    sink    = ltn12.sink.table(resp_body)
   }
+  if req_body then
+    req.source = ltn12.source.string(req_body)
+  end
 
+  local res, code, response_headers, status = https.request(req)
   local body_str = table.concat(resp_body)
-  debuglog("POST response code: " .. tostring(code) .. "\n  body: " .. body_str, dbg)
+  debuglog(method .. " response [" .. tostring(code) .. "]: " .. body_str, dbg)
 
   local data = nil
   if body_str and #body_str > 0 then
@@ -495,39 +368,7 @@ local function httpsPostJson(url, payload_table, extra_headers, dbg)
   return code, data, body_str
 end
 
--- Internal HTTPS GET helper
-local function httpsGetJson(url, extra_headers, dbg)
-  local resp_body = {}
-  local headers = {
-    ["accept"] = "application/json",
-    ["user-agent"] = "G-RAC"
-  }
-
-  if extra_headers then
-    for k, v in pairs(extra_headers) do headers[k] = v end
-  end
-
-  debuglog("GET " .. url, dbg)
-
-  local res, code, response_headers, status = https.request{
-    url = url,
-    method = "GET",
-    headers = headers,
-    sink = ltn12.sink.table(resp_body)
-  }
-
-  local body_str = table.concat(resp_body)
-  debuglog("GET response code: " .. tostring(code) .. "\n  body: " .. body_str, dbg)
-
-  local data = nil
-  if body_str and #body_str > 0 then
-    pcall(function() data = json.pdecode(body_str) or json.decode(body_str) end)
-  end
-
-  return code, data, body_str
-end
-
--- Build Comfort Cloud request headers
+-- Build Comfort Cloud signed headers
 local function getAccHeaders(session, include_client_id)
   local now_sec = os.time()
   local timestamp_str = os.date("!%Y-%m-%d %H:%M:%S", now_sec)
@@ -536,14 +377,11 @@ local function getAccHeaders(session, include_client_id)
   local api_key = generateCfcApiKey(timestamp_ms, session.access_token)
 
   local headers = {
-    ["accept"] = "application/json; charset=utf-8",
-    ["content-type"] = "application/json",
-    ["user-agent"] = "G-RAC",
-    ["x-app-name"] = "Comfort Cloud",
-    ["x-app-timestamp"] = timestamp_str,
-    ["x-app-type"] = "1",
-    ["x-app-version"] = getAppVersion(),
-    ["x-cfc-api-key"] = api_key,
+    ["x-app-name"]             = "Comfort Cloud",
+    ["x-app-timestamp"]        = timestamp_str,
+    ["x-app-type"]             = "1",
+    ["x-app-version"]          = getAppVersion(),
+    ["x-cfc-api-key"]          = api_key,
     ["x-user-authorization-v2"] = "Bearer " .. session.access_token
   }
 
@@ -564,18 +402,18 @@ function P.RefreshAccessToken(session, dbg)
   debuglog("Refreshing OAuth2 access token...", dbg)
 
   local payload = {
-    scope = session.scope or "openid offline_access comfortcloud.control a2w.control",
-    client_id = APP_CLIENT_ID,
+    scope         = session.scope or "openid offline_access comfortcloud.control a2w.control",
+    client_id     = APP_CLIENT_ID,
     refresh_token = session.refresh_token,
-    grant_type = "refresh_token"
+    grant_type    = "refresh_token"
   }
 
   local extra_headers = {
     ["Auth0-Client"] = AUTH0_CLIENT,
-    ["user-agent"] = AUTH_USER_AGENT
+    ["user-agent"]   = AUTH_USER_AGENT
   }
 
-  local code, resp = httpsPostJson(BASE_PATH_AUTH .. "/oauth/token", payload, extra_headers, dbg)
+  local code, resp = httpRequest("POST", BASE_PATH_AUTH .. "/oauth/token", payload, extra_headers, dbg)
   if code ~= 200 or not resp or not resp.access_token then
     log("PANASONIC: Token refresh failed (HTTP " .. tostring(code) .. ")")
     return nil, "Token refresh failed: " .. tostring(code)
@@ -589,14 +427,14 @@ function P.RefreshAccessToken(session, dbg)
 
   -- Acquire fresh Comfort Cloud Client ID
   local login_headers = getAccHeaders(session, false)
-  local acc_code, acc_resp, acc_raw = httpsPostJson(BASE_PATH_ACC .. "/auth/v2/login", { language = 0 }, login_headers, dbg)
+  local acc_code, acc_resp, acc_raw = httpRequest("POST", BASE_PATH_ACC .. "/auth/v2/login", { language = 0 }, login_headers, dbg)
 
   -- Error 4106 indicates app version is outdated — attempt fallback/bump
   if acc_code == 401 and acc_raw and acc_raw:find("4106") then
-    log("PANASONIC: App version rejected (code 4106), attempting version refresh...")
+    log("PANASONIC: App version rejected (code 4106), bumping version...")
     setAppVersion("1.21.0")
     login_headers = getAccHeaders(session, false)
-    acc_code, acc_resp = httpsPostJson(BASE_PATH_ACC .. "/auth/v2/login", { language = 0 }, login_headers, dbg)
+    acc_code, acc_resp = httpRequest("POST", BASE_PATH_ACC .. "/auth/v2/login", { language = 0 }, login_headers, dbg)
   end
 
   if acc_code == 200 and acc_resp and acc_resp.clientId then
@@ -646,6 +484,27 @@ function P.GetValidSession(dbg)
   return session
 end
 
+-- Centralized ACC request wrapper with automatic 401 token refresh & retry
+local function executeAccRequest(method, path, payload, dbg)
+  local session, err = P.GetValidSession(dbg)
+  if not session then return nil, err end
+
+  local url = BASE_PATH_ACC .. path
+  local headers = getAccHeaders(session, true)
+  local code, resp, raw = httpRequest(method, url, payload, headers, dbg)
+
+  -- If 401 Unauthorized, refresh token once and retry
+  if code == 401 then
+    session = P.RefreshAccessToken(session, dbg)
+    if session then
+      headers = getAccHeaders(session, true)
+      code, resp, raw = httpRequest(method, url, payload, headers, dbg)
+    end
+  end
+
+  return code, resp, raw
+end
+
 
 -- =============================================================================
 -- 10. PAYLOAD PARSER & STATUS / ENERGY GETTERS
@@ -653,21 +512,7 @@ end
 
 -- Fetch all registered devices
 function P.GetDevices(dbg)
-  local session, err = P.GetValidSession(dbg)
-  if not session then return nil, err end
-
-  local headers = getAccHeaders(session, true)
-  local code, resp = httpsGetJson(BASE_PATH_ACC .. "/device/group", headers, dbg)
-
-  -- Handle token expiration retry
-  if code == 401 then
-    session = P.RefreshAccessToken(session, dbg)
-    if session then
-      headers = getAccHeaders(session, true)
-      code, resp = httpsGetJson(BASE_PATH_ACC .. "/device/group", headers, dbg)
-    end
-  end
-
+  local code, resp = executeAccRequest("GET", "/device/group", nil, dbg)
   if code == 200 and resp and resp.groupList then
     return resp.groupList
   end
@@ -676,58 +521,40 @@ end
 
 -- Fetch today's energy consumption data for a device
 function P.GetEnergy(device_guid, dbg)
-  if not device_guid or #device_guid == 0 then
+  local guid = device_guid
+  if not guid or #guid == 0 then
     local sec = loadSecrets()
-    if sec and sec.device_guid then
-      device_guid = sec.device_guid
-    end
+    guid = sec and sec.device_guid
   end
-
-  if not device_guid or #device_guid == 0 then
-    return nil, "Device GUID is required"
-  end
-
-  local session, err = P.GetValidSession(dbg)
-  if not session then return nil, err end
+  if not guid or #guid == 0 then return nil, "Device GUID is required" end
 
   local today_str = os.date("%Y%m%d")
   local payload = {
-    deviceGuid = device_guid,
-    dataMode = 2, -- Month data mode contains daily items
-    date = today_str,
+    deviceGuid = guid,
+    dataMode   = 2, -- Month data mode contains daily items
+    date       = today_str,
     osTimezone = getLocalTimezoneOffset()
   }
 
-  local headers = getAccHeaders(session, true)
-  local url = BASE_PATH_ACC .. "/deviceHistoryData"
-  local code, resp = httpsPostJson(url, payload, headers, dbg)
-
-  if code == 401 then
-    session = P.RefreshAccessToken(session, dbg)
-    if session then
-      headers = getAccHeaders(session, true)
-      code, resp = httpsPostJson(url, payload, headers, dbg)
-    end
-  end
-
+  local code, resp = executeAccRequest("POST", "/deviceHistoryData", payload, dbg)
   if code == 200 and resp and resp.historyDataList then
     local energy_result = {
-      consumption = 0.0,
-      heating_rate = 0.0,
-      cooling_rate = 0.0,
+      consumption     = 0.0,
+      heating_rate    = 0.0,
+      cooling_rate    = 0.0,
       current_power_w = 0
     }
 
     for _, item in ipairs(resp.historyDataList) do
       if item.dataTime == today_str then
-        energy_result.consumption = extractNumber(item.consumption) or 0.0
+        energy_result.consumption  = extractNumber(item.consumption) or 0.0
         energy_result.heating_rate = extractNumber(item.heatConsumptionRate) or 0.0
         energy_result.cooling_rate = extractNumber(item.coolConsumptionRate) or 0.0
         break
       end
     end
 
-    energy_result.current_power_w = calculateExtrapolatedPower(device_guid, energy_result.consumption)
+    energy_result.current_power_w = calculateExtrapolatedPower(guid, energy_result.consumption)
     return energy_result
   end
 
@@ -736,62 +563,44 @@ end
 
 -- Fetch and parse live status of a single AC GUID (including zones & telemetry)
 function P.GetStatus(device_guid, dbg)
-  if not device_guid or #device_guid == 0 then
+  local guid = device_guid
+  if not guid or #guid == 0 then
     local sec = loadSecrets()
-    if sec and sec.device_guid then
-      device_guid = sec.device_guid
-    end
+    guid = sec and sec.device_guid
   end
+  if not guid or #guid == 0 then return nil, "Device GUID is required" end
 
-  if not device_guid or #device_guid == 0 then
-    return nil, "Device GUID is required"
-  end
-
-  local session, err = P.GetValidSession(dbg)
-  if not session then return nil, err end
-
-  local headers = getAccHeaders(session, true)
-  local url = BASE_PATH_ACC .. "/deviceStatus/now/" .. tostring(device_guid)
-  local code, resp = httpsGetJson(url, headers, dbg)
-
-  if code == 401 then
-    session = P.RefreshAccessToken(session, dbg)
-    if session then
-      headers = getAccHeaders(session, true)
-      code, resp = httpsGetJson(url, headers, dbg)
-    end
-  end
-
+  local code, resp = executeAccRequest("GET", "/deviceStatus/now/" .. tostring(guid), nil, dbg)
   if code == 200 and resp and resp.parameters then
     local p = resp.parameters
     local parsed = {
-      raw              = p,
-      power            = p.operate == 1,
-      target_temp      = sanitizeTemperature(p.temperatureSet),
-      inside_temp      = sanitizeTemperature(p.insideTemperature),
-      outside_temp     = sanitizeTemperature(p.outTemperature),
-      mode             = extractNumber(p.operationMode),
-      mode_name        = getModeName(p.operationMode),
-      fan_speed        = extractNumber(p.fanSpeed),
-      fan_name         = getFanSpeedName(p.fanSpeed),
-      eco_mode         = extractNumber(p.ecoMode),
-      eco_name         = getEcoModeName(p.ecoMode),
-      air_swing_ud     = extractNumber(p.airSwingUD),
-      air_swing_ud_name= getAirSwingUDName(p.airSwingUD),
-      air_swing_lr     = extractNumber(p.airSwingLR),
-      air_swing_lr_name= getAirSwingLRName(p.airSwingLR),
-      fan_auto_mode    = extractNumber(p.fanAutoMode),
-      nanoe            = extractNumber(p.nanoe),
-      eco_navi         = extractNumber(p.ecoNavi),
-      iauto_x          = extractNumber(p.iAutoX) or extractNumber(p.iauto),
-      inside_cleaning  = extractNumber(p.insideCleaning),
-      air_quality      = extractNumber(p.airQuality),
-      error_status     = extractNumber(p.errorStatus) or 0,
-      timestamp        = resp.timestamp or os.time(),
-      zones            = {}
+      raw               = p,
+      power             = p.operate == 1,
+      target_temp       = sanitizeTemperature(p.temperatureSet),
+      inside_temp       = sanitizeTemperature(p.insideTemperature),
+      outside_temp      = sanitizeTemperature(p.outTemperature),
+      mode              = extractNumber(p.operationMode),
+      mode_name         = OPERATION_MODE_NAMES[extractNumber(p.operationMode)] or "Unknown",
+      fan_speed         = extractNumber(p.fanSpeed),
+      fan_name          = FAN_SPEED_NAMES[extractNumber(p.fanSpeed)] or "Unknown",
+      eco_mode          = extractNumber(p.ecoMode),
+      eco_name          = ECO_MODE_NAMES[extractNumber(p.ecoMode)] or "Unknown",
+      air_swing_ud      = extractNumber(p.airSwingUD),
+      air_swing_ud_name = AIR_SWING_UD_NAMES[extractNumber(p.airSwingUD)] or "Unknown",
+      air_swing_lr      = extractNumber(p.airSwingLR),
+      air_swing_lr_name = AIR_SWING_LR_NAMES[extractNumber(p.airSwingLR)] or "Unknown",
+      fan_auto_mode     = extractNumber(p.fanAutoMode),
+      nanoe             = extractNumber(p.nanoe),
+      eco_navi          = extractNumber(p.ecoNavi),
+      iauto_x           = extractNumber(p.iAutoX) or extractNumber(p.iauto),
+      inside_cleaning   = extractNumber(p.insideCleaning),
+      air_quality       = extractNumber(p.airQuality),
+      error_status      = extractNumber(p.errorStatus) or 0,
+      timestamp         = resp.timestamp or os.time(),
+      zones             = {}
     }
 
-    -- Parse Zone Parameters if ducted zoning is installed
+    -- Parse Zone Parameters if ducted zoning is present
     if p.zoneParameters and type(p.zoneParameters) == "table" then
       for _, z in ipairs(p.zoneParameters) do
         local zid = extractNumber(z.zoneId)
@@ -816,37 +625,21 @@ end
 
 -- Send control parameters to an AC unit or individual zones
 function P.ControlDevice(device_guid, params, dbg)
-  if not device_guid or #device_guid == 0 then
+  local guid = device_guid
+  if not guid or #guid == 0 then
     local sec = loadSecrets()
-    if sec and sec.device_guid then
-      device_guid = sec.device_guid
-    end
+    guid = sec and sec.device_guid
   end
-
-  if not device_guid or #device_guid == 0 or not params or next(params) == nil then
+  if not guid or #guid == 0 or not params or next(params) == nil then
     return false, "Missing GUID or parameters"
   end
 
-  local session, err = P.GetValidSession(dbg)
-  if not session then return false, err end
-
-  local headers = getAccHeaders(session, true)
   local payload = {
-    deviceGuid = device_guid,
+    deviceGuid = guid,
     parameters = params
   }
 
-  local url = BASE_PATH_ACC .. "/deviceStatus/control"
-  local code, resp = httpsPostJson(url, payload, headers, dbg)
-
-  if code == 401 then
-    session = P.RefreshAccessToken(session, dbg)
-    if session then
-      headers = getAccHeaders(session, true)
-      code, resp = httpsPostJson(url, payload, headers, dbg)
-    end
-  end
-
+  local code, resp = executeAccRequest("POST", "/deviceStatus/control", payload, dbg)
   if code == 200 then
     debuglog("Control command applied successfully: " .. json.encode(params), dbg)
     return true
@@ -866,10 +659,7 @@ function P.ControlZone(device_guid, zone_id, zone_on_off, zone_level_percent, db
     zone_entry.zoneLevel = clamp(math.floor(tonumber(zone_level_percent) + 0.5), 0, 100)
   end
 
-  local params = {
-    zoneParameters = { zone_entry }
-  }
-  return P.ControlDevice(device_guid, params, dbg)
+  return P.ControlDevice(device_guid, { zoneParameters = { zone_entry } }, dbg)
 end
 
 
@@ -927,9 +717,7 @@ function P.Resident_Poll(config)
   local guid = config.device_guid
   if not guid or #guid == 0 then
     local sec = loadSecrets()
-    if sec and sec.device_guid then
-      guid = sec.device_guid
-    end
+    guid = sec and sec.device_guid
   end
 
   if not guid or #guid == 0 then
@@ -939,13 +727,12 @@ function P.Resident_Poll(config)
 
   local dbg = isDebuggingEnabled()
   local status, err = P.GetStatus(guid, dbg)
-
   if not status then
     if err then log("PANASONIC Poll Error: " .. tostring(err)) end
     return
   end
 
-  -- Optional Energy Fetch (if configured in objects/params or enabled)
+  -- Optional Energy Fetch
   local energy = nil
   if config.enable_energy ~= false and (config.cbus_energy or config.cbus_params) then
     energy = P.GetEnergy(guid, dbg)
@@ -968,7 +755,7 @@ function P.Resident_Poll(config)
   if objects.iauto_x and status.iauto_x ~= nil then safeSetGroup(objects.iauto_x, status.iauto_x, dbg) end
   if objects.inside_cleaning and status.inside_cleaning ~= nil then safeSetGroup(objects.inside_cleaning, status.inside_cleaning, dbg) end
 
-  -- 2. Sync Zones (cbus_zones = { [1] = { power = "1/2/1", damper = "1/2/11", temp = "1/2/21" }, ... })
+  -- 2. Sync Zones
   local zone_map = config.cbus_zones or {}
   for zid, zconf in pairs(zone_map) do
     local zdata = status.zones[tonumber(zid)]
@@ -1012,9 +799,7 @@ function P.Event_Control(config, dst_addr, val)
   local guid = config.device_guid
   if not guid or #guid == 0 then
     local sec = loadSecrets()
-    if sec and sec.device_guid then
-      guid = sec.device_guid
-    end
+    guid = sec and sec.device_guid
   end
 
   if not guid or #guid == 0 then
