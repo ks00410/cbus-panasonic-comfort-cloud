@@ -12,14 +12,21 @@ local panasonic = require("user.panasonic")
 -- CONFIGURATION
 -- =============================================================================
 --
--- C-Bus UserParams created automatically with prefix (e.g. "AC_"):
+-- C-Bus User Parameters to create in your C-Bus project / LogicMachine:
+-- (Create only the parameters you wish to monitor; the script matches by name)
+--
+-- Core Climate:
 --   AC_Power, AC_TargetTemp, AC_InsideTemp, AC_OutsideTemp
 --   AC_Mode, AC_Mode_Text, AC_FanSpeed, AC_FanSpeed_Text
 --   AC_EcoMode, AC_EcoMode_Text, AC_SwingUD, AC_SwingUD_Text, AC_SwingLR, AC_SwingLR_Text
 --   AC_Nanoe, AC_HVACAction, AC_HVACAction_Text, AC_ActiveZones, AC_LastUpdated
+--
+-- Multi-Zone Dampers:
 --   AC_Zone1_Power, AC_Zone1_Damper, AC_Zone1_Temp
 --   AC_Zone2_Power, AC_Zone2_Damper, AC_Zone2_Temp
 --   AC_Zone3_Power, AC_Zone3_Damper, AC_Zone3_Temp
+--
+-- Energy & Power Telemetry:
 --   AC_Daily_kWh, AC_Heating_kWh, AC_Cooling_kWh, AC_CurrentPower_W
 --
 local config = {

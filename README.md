@@ -77,8 +77,8 @@ Since LogicMachine runs headless without a terminal interface for interactive 2F
 3. Paste the contents of [`cbus/user_library_panasonic.lua`](cbus/user_library_panasonic.lua).
 4. Save.
 
-#### Step C: C-Bus User Parameters (C-Bus Native Architecture)
-The integration automatically updates **C-Bus UserParams** (on C-Bus Network 0) matching the standard C-Bus Lua naming conventions:
+#### Step C: Create C-Bus User Parameters in LogicMachine / C-Bus
+Create the **User Parameters** you wish to use in your C-Bus project (under C-Bus Network 0). The script matches them by name (prefixed by `AC_`). You do not need to create all of them—only create the parameters you want to monitor or display on touchscreens:
 
 ##### 1. Core Climate UserParams
 | UserParam Name | Data Type | Description |
