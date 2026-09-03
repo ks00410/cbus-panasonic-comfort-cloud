@@ -180,7 +180,11 @@ local function safeSetGroup(addr, value, debugEnabled)
       debuglog("Failed grp.checkupdate on " .. tostring(addr) .. ": " .. tostring(err), debugEnabled)
     end
   elseif type(SetCBusLevel) == "function" then
-    pcall(SetCBusLevel, CBUS_NETWORK, 56, addr, value, 0)
+    local lvl = value
+    if type(value) == "boolean" then
+      lvl = value and 255 or 0
+    end
+    pcall(SetCBusLevel, CBUS_NETWORK, 56, addr, lvl, 0)
   end
 end
 
@@ -833,10 +837,24 @@ function P.Event_Control(config, dst_addr, val)
     if e and e >= 0 and e <= 2 then params.ecoMode = e end
   elseif dst_addr == objects.air_swing_ud then
     local u = extractNumber(val)
-    if u and u >= -1 and u <= 5 then params.airSwingUD = u end
+    if u and u >= -1 and u <= 5 then
+      params.airSwingUD = u
+      if u == -1 then
+        params.fanAutoMode = 2 -- AirSwingUD Auto
+      else
+        params.fanAutoMode = 1 -- Disabled
+      end
+    end
   elseif dst_addr == objects.air_swing_lr then
     local l = extractNumber(val)
-    if l and l >= -1 and l <= 5 then params.airSwingLR = l end
+    if l and l >= -1 and l <= 5 then
+      params.airSwingLR = l
+      if l == -1 then
+        params.fanAutoMode = 3 -- AirSwingLR Auto
+      else
+        params.fanAutoMode = 1 -- Disabled
+      end
+    end
   elseif dst_addr == objects.nanoe then
     local n = extractNumber(val)
     if n and n >= 0 and n <= 4 then params.nanoe = n end
