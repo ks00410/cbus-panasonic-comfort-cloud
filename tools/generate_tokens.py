@@ -184,40 +184,42 @@ async def main():
             try:
                 headers = get_auth_headers()
                 # 1. Fetch latest agreement documents
-                doc_url = "https://accsmart.panasonic.com/auth/v2/agreement/documents?language=0"
-                async with session.get(doc_url, headers=headers) as resp:
-                    if resp.status != 200:
-                        return
-                    docs_resp = await resp.json()
-                    documents = docs_resp.get("agreementList", [])
-
-                # 2. Fetch currently accepted agreements
-                status_url = "https://accsmart.panasonic.com/auth/v2/agreement/status"
-                async with session.get(status_url, headers=headers) as resp:
-                    if resp.status != 200:
-                        return
-                    status_resp = await resp.json()
-                    accepted = status_resp.get("agreementList", [])
-
-                accepted_versions = {item.get("type"): item.get("version") for item in accepted}
-                auto_accept_types = {1, 2, 4} # 1: Terms, 2: Privacy, 4: Cookie Policy
-
+                doc_url = "https://accsmart.panasonic.com/auth/v2/agreement/documents?language=0&includeContent=0"
                 to_accept = []
-                for doc in documents:
-                    try:
-                        dtype = int(doc.get("type"))
-                    except (TypeError, ValueError):
-                        continue
-                    if dtype in auto_accept_types:
-                        latest_ver = doc.get("version")
-                        if latest_ver and accepted_versions.get(dtype) != latest_ver:
-                            to_accept.append({"type": dtype, "version": latest_ver})
+                auto_types = {1, 2, 4} # 1: Terms, 2: Privacy, 4: Cookie Policy
+                status_url = "https://accsmart.panasonic.com/auth/v2/agreement/status"
 
-                if to_accept:
-                    print(f"\nAuto-accepting updated Panasonic Terms & Privacy Agreements: {to_accept} ...")
-                    async with session.put(status_url, headers=get_auth_headers(), json={"agreementList": to_accept}) as put_resp:
-                        if put_resp.status == 200:
-                            print("Agreements accepted successfully!")
+                async with session.get(doc_url, headers=headers) as resp:
+                    if resp.status == 200:
+                        docs_resp = await resp.json()
+                        documents = docs_resp.get("agreementList", [])
+
+                        # 2. Fetch currently accepted agreements
+                        async with session.get(status_url, headers=headers) as stat_resp:
+                            if stat_resp.status == 200:
+                                stat_data = await stat_resp.json()
+                                accepted = stat_data.get("agreementList", [])
+                                accepted_versions = {item.get("type"): item.get("version") for item in accepted}
+                                for doc in documents:
+                                    try:
+                                        dtype = int(doc.get("type"))
+                                    except (TypeError, ValueError):
+                                        continue
+                                    if dtype in auto_types:
+                                        latest_ver = doc.get("version")
+                                        if latest_ver and accepted_versions.get(dtype) != latest_ver:
+                                            to_accept.append({"type": dtype, "version": latest_ver})
+
+                if not to_accept:
+                    for dtype in auto_types:
+                        to_accept.append({"type": dtype, "version": ""})
+
+                print(f"\nSubmitting updated Panasonic Terms & Privacy Agreements: {to_accept} ...")
+                async with session.put(status_url, headers=get_auth_headers(), json={"agreementList": to_accept}) as put_resp:
+                    if put_resp.status == 200:
+                        print("Agreements accepted successfully!")
+                    else:
+                        print(f"Agreement submission status: {put_resp.status}")
             except Exception as e:
                 print(f"Agreement auto-acceptance note: {e}")
 

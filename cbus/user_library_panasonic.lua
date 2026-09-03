@@ -506,44 +506,50 @@ function P.AcceptAgreements(session, dbg)
   debuglog("Auto-accepting updated Panasonic Terms & Privacy Agreements...", dbg)
   local headers = getAccHeaders(session, false)
 
-  -- 1. Fetch available agreement documents
-  local doc_code, doc_resp = httpRequest("GET", BASE_PATH_ACC .. "/auth/v2/agreement/documents?language=0", nil, headers, dbg)
-  if doc_code ~= 200 or not doc_resp or not doc_resp.agreementList then return false end
-
-  -- 2. Fetch currently accepted agreements
-  local stat_code, stat_resp = httpRequest("GET", BASE_PATH_ACC .. "/auth/v2/agreement/status", nil, headers, dbg)
-  local accepted_map = {}
-  if stat_code == 200 and stat_resp and stat_resp.agreementList then
-    for _, item in ipairs(stat_resp.agreementList) do
-      if item.type and item.version then
-        accepted_map[tonumber(item.type)] = tostring(item.version)
-      end
-    end
-  end
-
-  -- Types to auto-accept: 1 (Terms), 2 (Privacy), 4 (Cookie Policy)
-  local auto_types = { [1] = true, [2] = true, [4] = true }
+  -- 1. Fetch available agreement documents (requires language=0&includeContent=0)
+  local doc_code, doc_resp = httpRequest("GET", BASE_PATH_ACC .. "/auth/v2/agreement/documents?language=0&includeContent=0", nil, headers, dbg)
   local to_accept = {}
+  local auto_types = { [1] = true, [2] = true, [4] = true }
 
-  for _, doc in ipairs(doc_resp.agreementList) do
-    local dtype = tonumber(doc.type)
-    if dtype and auto_types[dtype] then
-      local latest_ver = tostring(doc.version or "")
-      if #latest_ver > 0 and accepted_map[dtype] ~= latest_ver then
-        table.insert(to_accept, { type = dtype, version = latest_ver })
+  if doc_code == 200 and doc_resp and doc_resp.agreementList then
+    -- 2. Fetch currently accepted agreements
+    local stat_code, stat_resp = httpRequest("GET", BASE_PATH_ACC .. "/auth/v2/agreement/status", nil, headers, dbg)
+    local accepted_map = {}
+    if stat_code == 200 and stat_resp and stat_resp.agreementList then
+      for _, item in ipairs(stat_resp.agreementList) do
+        if item.type and item.version then
+          accepted_map[tonumber(item.type)] = tostring(item.version)
+        end
+      end
+    end
+
+    for _, doc in ipairs(doc_resp.agreementList) do
+      local dtype = tonumber(doc.type)
+      if dtype and auto_types[dtype] then
+        local latest_ver = tostring(doc.version or "")
+        if #latest_ver > 0 and accepted_map[dtype] ~= latest_ver then
+          table.insert(to_accept, { type = dtype, version = latest_ver })
+        end
       end
     end
   end
 
-  if #to_accept > 0 then
-    local put_headers = getAccHeaders(session, false)
-    local put_code = httpRequest("PUT", BASE_PATH_ACC .. "/auth/v2/agreement/status", { agreementList = to_accept }, put_headers, dbg)
-    if put_code == 200 then
-      log("PANASONIC: Successfully accepted updated agreements.")
-      return true
+  -- Fallback: If document lookup failed or returned empty, submit latest known standard agreements for types 1, 2, 4
+  if #to_accept == 0 then
+    for dtype, _ in pairs(auto_types) do
+      table.insert(to_accept, { type = dtype, version = "" })
     end
   end
-  return true
+
+  local put_headers = getAccHeaders(session, false)
+  local put_code, put_resp, put_raw = httpRequest("PUT", BASE_PATH_ACC .. "/auth/v2/agreement/status", { agreementList = to_accept }, put_headers, dbg)
+  if put_code == 200 then
+    log("PANASONIC: Terms & Agreements accepted successfully (HTTP 200).")
+    return true
+  else
+    debuglog("Agreement acceptance response (" .. tostring(put_code) .. "): " .. tostring(put_raw), dbg)
+    return false
+  end
 end
 
 -- Refresh OAuth2 Access Token using Refresh Token
@@ -601,6 +607,8 @@ function P.RefreshAccessToken(session, dbg)
   if acc_code == 200 and acc_resp and acc_resp.clientId then
     session.client_id = acc_resp.clientId
     debuglog("Acquired fresh ACC client_id: " .. tostring(session.client_id), dbg)
+  else
+    log("PANASONIC: ACC Login returned HTTP " .. tostring(acc_code) .. " (clientId not acquired)")
   end
 
   -- Save to persistent storage
@@ -665,11 +673,15 @@ local function executeAccRequest(method, path, payload, dbg)
       headers = getAccHeaders(session, true)
       code, resp, raw = httpRequest(method, url, payload, headers, dbg)
     end
-  -- If 412 Precondition Failed, auto-accept agreements and retry once
+  -- If 412 Precondition Failed, accept agreements and re-authenticate to refresh client_id
   elseif code == 412 then
+    log("PANASONIC: Received HTTP 412. Accepting agreements and refreshing session...")
     P.AcceptAgreements(session, dbg)
-    headers = getAccHeaders(session, true)
-    code, resp, raw = httpRequest(method, url, payload, headers, dbg)
+    session = P.RefreshAccessToken(session, dbg)
+    if session then
+      headers = getAccHeaders(session, true)
+      code, resp, raw = httpRequest(method, url, payload, headers, dbg)
+    end
   end
 
   return code, resp, raw
