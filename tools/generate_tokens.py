@@ -179,13 +179,16 @@ async def main():
                         gname = group.get("groupName", "Default Group")
                         dev_list = group.get("deviceList", []) or group.get("deviceIdList", [])
                         for d in dev_list:
-                            if d and "deviceGuid" in d:
+                            if d and isinstance(d, dict) and "deviceGuid" in d:
                                 devices_info.append({
                                     "name": d.get("deviceName", "Panasonic AC"),
                                     "guid": d.get("deviceGuid"),
                                     "model": d.get("deviceModuleNumber", ""),
                                     "group": gname
                                 })
+                else:
+                    err_body = await resp.text()
+                    print(f"Warning: Device discovery returned HTTP {resp.status}: {err_body}")
         except Exception as e:
             print(f"Warning: Could not fetch device list: {e}")
 
