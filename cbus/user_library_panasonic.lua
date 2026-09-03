@@ -476,12 +476,12 @@ end
 -- Build Comfort Cloud signed headers
 local function getAccHeaders(session, include_client_id)
   local now_sec = os.time()
-  -- Local time representation without timezone suffix to match app convention
+  -- Local time representation matching Panasonic app convention
   local timestamp_str = os.date("%Y-%m-%d %H:%M:%S", now_sec)
-  -- UTC timestamp in milliseconds for HMAC key component
-  local utc_date = os.date("!*t", now_sec)
-  local utc_sec = os.time(utc_date)
-  local timestamp_ms = utc_sec * 1000
+  -- Convert formatted local timestamp string components into naive UTC epoch milliseconds
+  local utc_sec = os.time(os.date("!*t", now_sec))
+  local offset_sec = os.difftime(now_sec, utc_sec)
+  local timestamp_ms = string.format("%.0f", (now_sec + offset_sec) * 1000)
 
   local api_key = generateCfcApiKey(timestamp_ms, session.access_token)
 
