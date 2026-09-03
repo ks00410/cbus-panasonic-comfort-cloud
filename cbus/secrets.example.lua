@@ -9,10 +9,10 @@
 ================================================================================
 --]]
 
-local S = {}
-secrets = S   -- Global registration
+local s = {}
+secrets = s   -- Global registration
 
-S.panasonic = {
+s.panasonic = {
   -- Tokens obtained from tools/generate_tokens.py
   refresh_token = "REPLACE_WITH_YOUR_REFRESH_TOKEN",
   access_token  = "REPLACE_WITH_YOUR_ACCESS_TOKEN",
@@ -23,4 +23,4 @@ S.panasonic = {
   device_guid   = "REPLACE_WITH_YOUR_DEVICE_GUID"
 }
 
-return S
+return s

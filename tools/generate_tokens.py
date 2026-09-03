@@ -269,10 +269,10 @@ async def main():
         print("COPY AND PASTE THIS INTO YOUR LOGICMACHINE 'secrets' USER LIBRARY:")
         print("=" * 60)
 
-        secrets_lua_content = f"""local S = {{}}
-secrets = S   -- Global registration
+        secrets_lua_content = f"""local s = {{}}
+secrets = s   -- Global registration
 
-S.panasonic = {{
+s.panasonic = {{
   refresh_token = "{refresh_token}",
   access_token  = "{access_token}",
   client_id     = "{client_id}",
@@ -280,7 +280,7 @@ S.panasonic = {{
   device_guid   = "{selected_guid}"
 }}
 
-return S"""
+return s"""
         print(secrets_lua_content)
 
         # Run live API test

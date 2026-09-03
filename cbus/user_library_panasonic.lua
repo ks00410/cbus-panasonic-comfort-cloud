@@ -210,11 +210,14 @@ end
 
 -- Load secrets from the 'secrets' user library
 local function loadSecrets()
+  if type(secrets) == "table" and secrets.panasonic then
+    return secrets.panasonic
+  end
   local ok, mod = pcall(require, "user.secrets")
-  if ok and mod and mod.panasonic then
+  if ok and type(mod) == "table" and mod.panasonic then
     return mod.panasonic
   end
-  return secrets and secrets.panasonic or nil
+  return nil
 end
 
 -- Extract numeric float/int from string or raw value
