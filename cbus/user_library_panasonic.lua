@@ -24,9 +24,10 @@
 -- 1. REQUIRE / MODULE TABLE & GLOBAL REGISTRATION
 -- =============================================================================
 
-local https = require("ssl.https")
-local ltn12 = require("ltn12")
-local json  = require("json")
+local https   = require("ssl.https")
+local ltn12   = require("ltn12")
+local json    = require("json")
+local secrets = require("user.secrets")
 
 -- Support both 'crypto' and 'sha2' libraries across different LM firmware builds
 local sha2 = nil
@@ -47,14 +48,8 @@ panasonic = P   -- Global registration for C-Bus / LM execution environment
 
 
 -- =============================================================================
--- 2. CONFIGURATION
+-- 2. CONFIGURATION & CONSTANTS
 -- =============================================================================
-
--- C-Bus Network ID (Default: 0 for local network)
-local CBUS_NETWORK = 0
-
--- UserParam name for toggling debug output (Boolean: true/false or 1/0)
-local DEBUG_PARAM = "Debug"
 
 -- Panasonic Client Constants (Public client configuration)
 local APP_CLIENT_ID       = "Xmy6xIYIitMxngjB2rHvlm6HSDNnaMJx"
@@ -134,12 +129,14 @@ local _energyState = {}
 -- =============================================================================
 
 -- Check if debug logging is enabled via config table or C-Bus UserParam
-local function isDebuggingEnabled(network, custom_debug_param, explicit_debug)
+local function isDebuggingEnabled(network, debug_param, explicit_debug)
   if explicit_debug == true then return true end
-  local net = network or CBUS_NETWORK
-  local param_name = custom_debug_param or DEBUG_PARAM
-  local ok, val = pcall(GetUserParam, net, param_name)
-  return ok and val == true
+  if debug_param and type(debug_param) == "string" and #debug_param > 0 then
+    local net = network or 0
+    local ok, val = pcall(GetUserParam, net, debug_param)
+    return ok and val == true
+  end
+  return false
 end
 
 -- Conditional debug logger
@@ -175,17 +172,17 @@ local function safeSetUserParam(network, name, value, debugEnabled)
 end
 
 -- Resolve C-Bus UserParam name (checks config.cbus_params overrides first, then falls back to prefix)
-local function getParamName(config, attr, default_suffix)
-  local params = config and config.cbus_params or {}
-  if params[attr] and type(params[attr]) == "string" and #params[attr] > 0 then
-    return params[attr]
+local function getParamName(config, name)
+  local params = config and config.cbus_params
+  if params and params[name] then
+    return params[name]
   end
   local pfx = (config and config.param_prefix) or "AC_"
-  return pfx .. (default_suffix or attr)
+  return pfx .. name
 end
 
 -- Safe write for C-Bus Group Address (e.g., Integer 0..255 or string "1/1/1")
-local function safeSetGroup(addr, value, debugEnabled)
+local function safeSetGroup(network, addr, value, debugEnabled)
   if addr == nil or value == nil then return end
 
   -- Native C-Bus group helper
@@ -196,7 +193,7 @@ local function safeSetGroup(addr, value, debugEnabled)
     elseif type(value) == "number" then
       lvl = clamp(math.floor(value + 0.5), 0, 255)
     end
-    pcall(SetCBusLevel, CBUS_NETWORK, 56, addr, lvl, 0)
+    pcall(SetCBusLevel, network or 0, 56, addr, lvl, 0)
     return
   end
 
@@ -214,12 +211,8 @@ end
 -- 7. UTILITY & SECRETS HELPERS
 -- =============================================================================
 
--- Load secrets from the 'secrets' user library
+-- Load secrets from the 'user.secrets' library
 local function loadSecrets()
-  local ok, mod = pcall(require, "user.secrets")
-  if ok and mod and mod.panasonic then
-    return mod.panasonic
-  end
   return secrets and secrets.panasonic or nil
 end
 
@@ -941,8 +934,8 @@ function P.Resident_Poll(config)
     return
   end
 
-  local net = config.cbus_network or CBUS_NETWORK
-  local dbg = isDebuggingEnabled(net, config.debug_param, config.debug)
+  local CBUS_NETWORK = config.cbus_network or 0
+  local dbg = isDebuggingEnabled(CBUS_NETWORK, config.debug_param, config.debug)
   local status, err = P.GetStatus(guid, dbg)
   if not status then
     if err then log("PANASONIC Poll Error: " .. tostring(err)) end
@@ -957,90 +950,86 @@ function P.Resident_Poll(config)
 
   local objects = config.cbus_objects or {}
 
-  -- 1. Sync Core Climate
-  if objects.power and status.power ~= nil then safeSetGroup(objects.power, status.power, dbg) end
-  if objects.target_temp and status.target_temp ~= nil then safeSetGroup(objects.target_temp, status.target_temp, dbg) end
-  if objects.inside_temp and status.inside_temp ~= nil then safeSetGroup(objects.inside_temp, status.inside_temp, dbg) end
-  if objects.outside_temp and status.outside_temp ~= nil then safeSetGroup(objects.outside_temp, status.outside_temp, dbg) end
-  if objects.mode and status.mode ~= nil then safeSetGroup(objects.mode, status.mode, dbg) end
-  if objects.fan_speed and status.fan_speed ~= nil then safeSetGroup(objects.fan_speed, status.fan_speed, dbg) end
-  if objects.eco_mode and status.eco_mode ~= nil then safeSetGroup(objects.eco_mode, status.eco_mode, dbg) end
-  if objects.air_swing_ud and status.air_swing_ud ~= nil then safeSetGroup(objects.air_swing_ud, status.air_swing_ud, dbg) end
-  if objects.air_swing_lr and status.air_swing_lr ~= nil then safeSetGroup(objects.air_swing_lr, status.air_swing_lr, dbg) end
-  if objects.nanoe and status.nanoe ~= nil then safeSetGroup(objects.nanoe, status.nanoe, dbg) end
-  if objects.eco_navi and status.eco_navi ~= nil then safeSetGroup(objects.eco_navi, status.eco_navi, dbg) end
-  if objects.iauto_x and status.iauto_x ~= nil then safeSetGroup(objects.iauto_x, status.iauto_x, dbg) end
-  if objects.inside_cleaning and status.inside_cleaning ~= nil then safeSetGroup(objects.inside_cleaning, status.inside_cleaning, dbg) end
+  -- 1. Sync Core Climate Group Objects
+  if objects.power and status.power ~= nil then safeSetGroup(CBUS_NETWORK, objects.power, status.power, dbg) end
+  if objects.target_temp and status.target_temp ~= nil then safeSetGroup(CBUS_NETWORK, objects.target_temp, status.target_temp, dbg) end
+  if objects.inside_temp and status.inside_temp ~= nil then safeSetGroup(CBUS_NETWORK, objects.inside_temp, status.inside_temp, dbg) end
+  if objects.outside_temp and status.outside_temp ~= nil then safeSetGroup(CBUS_NETWORK, objects.outside_temp, status.outside_temp, dbg) end
+  if objects.mode and status.mode ~= nil then safeSetGroup(CBUS_NETWORK, objects.mode, status.mode, dbg) end
+  if objects.fan_speed and status.fan_speed ~= nil then safeSetGroup(CBUS_NETWORK, objects.fan_speed, status.fan_speed, dbg) end
+  if objects.eco_mode and status.eco_mode ~= nil then safeSetGroup(CBUS_NETWORK, objects.eco_mode, status.eco_mode, dbg) end
+  if objects.air_swing_ud and status.air_swing_ud ~= nil then safeSetGroup(CBUS_NETWORK, objects.air_swing_ud, status.air_swing_ud, dbg) end
+  if objects.air_swing_lr and status.air_swing_lr ~= nil then safeSetGroup(CBUS_NETWORK, objects.air_swing_lr, status.air_swing_lr, dbg) end
+  if objects.nanoe and status.nanoe ~= nil then safeSetGroup(CBUS_NETWORK, objects.nanoe, status.nanoe, dbg) end
+  if objects.eco_navi and status.eco_navi ~= nil then safeSetGroup(CBUS_NETWORK, objects.eco_navi, status.eco_navi, dbg) end
+  if objects.iauto_x and status.iauto_x ~= nil then safeSetGroup(CBUS_NETWORK, objects.iauto_x, status.iauto_x, dbg) end
+  if objects.inside_cleaning and status.inside_cleaning ~= nil then safeSetGroup(CBUS_NETWORK, objects.inside_cleaning, status.inside_cleaning, dbg) end
   if (objects.hvac_action or objects.action) and status.hvac_action ~= nil then
-    safeSetGroup(objects.hvac_action or objects.action, status.hvac_action, dbg)
+    safeSetGroup(CBUS_NETWORK, objects.hvac_action or objects.action, status.hvac_action, dbg)
   end
   if (objects.active_zones_count or objects.active_zones) and status.active_zones_count ~= nil then
-    safeSetGroup(objects.active_zones_count or objects.active_zones, status.active_zones_count, dbg)
+    safeSetGroup(CBUS_NETWORK, objects.active_zones_count or objects.active_zones, status.active_zones_count, dbg)
   end
 
-  -- 2. Sync Zones
+  -- 2. Sync Zones Group Objects
   local zone_map = config.cbus_zones or {}
   for zid, zconf in pairs(zone_map) do
     local zdata = status.zones[tonumber(zid)]
     if zdata then
-      if zconf.power and zdata.power ~= nil then safeSetGroup(zconf.power, zdata.power, dbg) end
-      if zconf.damper and zdata.damper ~= nil then safeSetGroup(zconf.damper, zdata.damper, dbg) end
-      if zconf.temp and zdata.temperature ~= nil then safeSetGroup(zconf.temp, zdata.temperature, dbg) end
+      if zconf.power and zdata.power ~= nil then safeSetGroup(CBUS_NETWORK, zconf.power, zdata.power, dbg) end
+      if zconf.damper and zdata.damper ~= nil then safeSetGroup(CBUS_NETWORK, zconf.damper, zdata.damper, dbg) end
+      if zconf.temp and zdata.temperature ~= nil then safeSetGroup(CBUS_NETWORK, zconf.temp, zdata.temperature, dbg) end
     end
   end
 
-  -- 3. Sync Energy Objects
+  -- 3. Sync Energy Group Objects
   local energy_objects = config.cbus_energy or {}
   if energy then
-    if energy_objects.daily_kwh and energy.consumption ~= nil then safeSetGroup(energy_objects.daily_kwh, energy.consumption, dbg) end
-    if energy_objects.heating_kwh and energy.heating_rate ~= nil then safeSetGroup(energy_objects.heating_kwh, energy.heating_rate, dbg) end
-    if energy_objects.cooling_kwh and energy.cooling_rate ~= nil then safeSetGroup(energy_objects.cooling_kwh, energy.cooling_rate, dbg) end
-    if energy_objects.current_power_w and energy.current_power_w ~= nil then safeSetGroup(energy_objects.current_power_w, energy.current_power_w, dbg) end
+    if energy_objects.daily_kwh and energy.consumption ~= nil then safeSetGroup(CBUS_NETWORK, energy_objects.daily_kwh, energy.consumption, dbg) end
+    if energy_objects.heating_kwh and energy.heating_rate ~= nil then safeSetGroup(CBUS_NETWORK, energy_objects.heating_kwh, energy.heating_rate, dbg) end
+    if energy_objects.cooling_kwh and energy.cooling_rate ~= nil then safeSetGroup(CBUS_NETWORK, energy_objects.cooling_kwh, energy.cooling_rate, dbg) end
+    if energy_objects.current_power_w and energy.current_power_w ~= nil then safeSetGroup(CBUS_NETWORK, energy_objects.current_power_w, energy.current_power_w, dbg) end
   end
 
   -- 4. Sync UserParams (Prefix-based with explicit cbus_params overrides)
-  local net = config.cbus_network or CBUS_NETWORK
-
-  -- Core climate UserParams
-  safeSetUserParam(net, getParamName(config, "power", "Power"), status.power and 1 or 0, dbg)
-  safeSetUserParam(net, getParamName(config, "target_temp", "TargetTemp"), status.target_temp, dbg)
-  safeSetUserParam(net, getParamName(config, "inside_temp", "InsideTemp"), status.inside_temp, dbg)
-  safeSetUserParam(net, getParamName(config, "outside_temp", "OutsideTemp"), status.outside_temp, dbg)
-  safeSetUserParam(net, getParamName(config, "mode", "Mode"), status.mode, dbg)
-  safeSetUserParam(net, getParamName(config, "mode_name", "Mode_Text"), status.mode_name, dbg)
-  safeSetUserParam(net, getParamName(config, "fan_speed", "FanSpeed"), status.fan_speed, dbg)
-  safeSetUserParam(net, getParamName(config, "fan_name", "FanSpeed_Text"), status.fan_name, dbg)
-  safeSetUserParam(net, getParamName(config, "eco_mode", "EcoMode"), status.eco_mode, dbg)
-  safeSetUserParam(net, getParamName(config, "eco_name", "EcoMode_Text"), status.eco_name, dbg)
-  safeSetUserParam(net, getParamName(config, "air_swing_ud", "SwingUD"), status.air_swing_ud, dbg)
-  safeSetUserParam(net, getParamName(config, "air_swing_ud_name", "SwingUD_Text"), status.air_swing_ud_name, dbg)
-  safeSetUserParam(net, getParamName(config, "air_swing_lr", "SwingLR"), status.air_swing_lr, dbg)
-  safeSetUserParam(net, getParamName(config, "air_swing_lr_name", "SwingLR_Text"), status.air_swing_lr_name, dbg)
-  safeSetUserParam(net, getParamName(config, "nanoe", "Nanoe"), status.nanoe, dbg)
-  safeSetUserParam(net, getParamName(config, "eco_navi", "EcoNavi"), status.eco_navi, dbg)
-  safeSetUserParam(net, getParamName(config, "iauto_x", "IAutoX"), status.iauto_x, dbg)
-  safeSetUserParam(net, getParamName(config, "inside_cleaning", "InsideCleaning"), status.inside_cleaning, dbg)
-  safeSetUserParam(net, getParamName(config, "hvac_action", "HVACAction"), status.hvac_action, dbg)
-  safeSetUserParam(net, getParamName(config, "hvac_action_name", "HVACAction_Text"), status.hvac_action_name, dbg)
-  safeSetUserParam(net, getParamName(config, "active_zones", "ActiveZones"), status.active_zones_count, dbg)
-  safeSetUserParam(net, getParamName(config, "last_updated", "LastUpdated"), os.date("%d %b %Y, %H:%M"), dbg)
+  safeSetUserParam(CBUS_NETWORK, getParamName(config, "Power"), status.power and 1 or 0, dbg)
+  safeSetUserParam(CBUS_NETWORK, getParamName(config, "TargetTemp"), status.target_temp, dbg)
+  safeSetUserParam(CBUS_NETWORK, getParamName(config, "InsideTemp"), status.inside_temp, dbg)
+  safeSetUserParam(CBUS_NETWORK, getParamName(config, "OutsideTemp"), status.outside_temp, dbg)
+  safeSetUserParam(CBUS_NETWORK, getParamName(config, "Mode"), status.mode, dbg)
+  safeSetUserParam(CBUS_NETWORK, getParamName(config, "Mode_Text"), status.mode_name, dbg)
+  safeSetUserParam(CBUS_NETWORK, getParamName(config, "FanSpeed"), status.fan_speed, dbg)
+  safeSetUserParam(CBUS_NETWORK, getParamName(config, "FanSpeed_Text"), status.fan_name, dbg)
+  safeSetUserParam(CBUS_NETWORK, getParamName(config, "EcoMode"), status.eco_mode, dbg)
+  safeSetUserParam(CBUS_NETWORK, getParamName(config, "EcoMode_Text"), status.eco_name, dbg)
+  safeSetUserParam(CBUS_NETWORK, getParamName(config, "SwingUD"), status.air_swing_ud, dbg)
+  safeSetUserParam(CBUS_NETWORK, getParamName(config, "SwingUD_Text"), status.air_swing_ud_name, dbg)
+  safeSetUserParam(CBUS_NETWORK, getParamName(config, "SwingLR"), status.air_swing_lr, dbg)
+  safeSetUserParam(CBUS_NETWORK, getParamName(config, "SwingLR_Text"), status.air_swing_lr_name, dbg)
+  safeSetUserParam(CBUS_NETWORK, getParamName(config, "Nanoe"), status.nanoe, dbg)
+  safeSetUserParam(CBUS_NETWORK, getParamName(config, "EcoNavi"), status.eco_navi, dbg)
+  safeSetUserParam(CBUS_NETWORK, getParamName(config, "IAutoX"), status.iauto_x, dbg)
+  safeSetUserParam(CBUS_NETWORK, getParamName(config, "InsideCleaning"), status.inside_cleaning, dbg)
+  safeSetUserParam(CBUS_NETWORK, getParamName(config, "HVACAction"), status.hvac_action, dbg)
+  safeSetUserParam(CBUS_NETWORK, getParamName(config, "HVACAction_Text"), status.hvac_action_name, dbg)
+  safeSetUserParam(CBUS_NETWORK, getParamName(config, "ActiveZones"), status.active_zones_count, dbg)
+  safeSetUserParam(CBUS_NETWORK, getParamName(config, "LastUpdated"), os.date("%d %b %Y, %H:%M"), dbg)
 
   -- Zone UserParams
-  local pfx = config.param_prefix or "AC_"
   for zid, zdata in pairs(status.zones) do
-    safeSetUserParam(net, getParamName(config, "zone" .. zid .. "_power", string.format("Zone%d_Power", zid)), zdata.power and 1 or 0, dbg)
-    safeSetUserParam(net, getParamName(config, "zone" .. zid .. "_damper", string.format("Zone%d_Damper", zid)), zdata.damper, dbg)
+    safeSetUserParam(CBUS_NETWORK, getParamName(config, string.format("Zone%d_Power", zid)), zdata.power and 1 or 0, dbg)
+    safeSetUserParam(CBUS_NETWORK, getParamName(config, string.format("Zone%d_Damper", zid)), zdata.damper, dbg)
     if zdata.temperature then
-      safeSetUserParam(net, getParamName(config, "zone" .. zid .. "_temp", string.format("Zone%d_Temp", zid)), zdata.temperature, dbg)
+      safeSetUserParam(CBUS_NETWORK, getParamName(config, string.format("Zone%d_Temp", zid)), zdata.temperature, dbg)
     end
   end
 
   -- Energy UserParams
   if energy then
-    safeSetUserParam(net, getParamName(config, "daily_kwh", "Daily_kWh"), energy.consumption, dbg)
-    safeSetUserParam(net, getParamName(config, "heating_kwh", "Heating_kWh"), energy.heating_rate, dbg)
-    safeSetUserParam(net, getParamName(config, "cooling_kwh", "Cooling_kWh"), energy.cooling_rate, dbg)
-    safeSetUserParam(net, getParamName(config, "current_power_w", "CurrentPower_W"), energy.current_power_w, dbg)
+    safeSetUserParam(CBUS_NETWORK, getParamName(config, "Daily_kWh"), energy.consumption, dbg)
+    safeSetUserParam(CBUS_NETWORK, getParamName(config, "Heating_kWh"), energy.heating_rate, dbg)
+    safeSetUserParam(CBUS_NETWORK, getParamName(config, "Cooling_kWh"), energy.cooling_rate, dbg)
+    safeSetUserParam(CBUS_NETWORK, getParamName(config, "CurrentPower_W"), energy.current_power_w, dbg)
   end
 
   -- 5. Debug output
@@ -1072,50 +1061,50 @@ function P.Event_Control(config, dst_target, val)
     target = target.dst
   end
 
-  local net = config.cbus_network or CBUS_NETWORK
-  local dbg = isDebuggingEnabled(net, config.debug_param, config.debug)
+  local CBUS_NETWORK = config.cbus_network or 0
+  local dbg = isDebuggingEnabled(CBUS_NETWORK, config.debug_param, config.debug)
   local objects = config.cbus_objects or {}
   local zone_map = config.cbus_zones or {}
   local pfx = config.param_prefix or "AC_"
   local params = {}
 
   -- 1. Check Core Climate Controls (Group Addresses or UserParam names)
-  if target == objects.power or target == getParamName(config, "power", "Power") then
+  if target == objects.power or target == getParamName(config, "Power") then
     params.operate = (raw_val == true or raw_val == 1 or raw_val == 255) and 1 or 0
-  elseif target == objects.target_temp or target == getParamName(config, "target_temp", "TargetTemp") then
+  elseif target == objects.target_temp or target == getParamName(config, "TargetTemp") then
     local t = extractNumber(raw_val)
     if t then params.temperatureSet = clamp(t, MIN_TARGET_TEMP, MAX_TARGET_TEMP) end
-  elseif target == objects.mode or target == getParamName(config, "mode", "Mode") then
+  elseif target == objects.mode or target == getParamName(config, "Mode") then
     local m = extractNumber(raw_val)
     if m and m >= 0 and m <= 4 then params.operationMode = m end
-  elseif target == objects.fan_speed or target == getParamName(config, "fan_speed", "FanSpeed") then
+  elseif target == objects.fan_speed or target == getParamName(config, "FanSpeed") then
     local s = extractNumber(raw_val)
     if s and s >= 0 and s <= 5 then params.fanSpeed = s end
-  elseif target == objects.eco_mode or target == getParamName(config, "eco_mode", "EcoMode") then
+  elseif target == objects.eco_mode or target == getParamName(config, "EcoMode") then
     local e = extractNumber(raw_val)
     if e and e >= 0 and e <= 2 then params.ecoMode = e end
-  elseif target == objects.air_swing_ud or target == getParamName(config, "air_swing_ud", "SwingUD") then
+  elseif target == objects.air_swing_ud or target == getParamName(config, "SwingUD") then
     local u = extractNumber(raw_val)
     if u and u >= -1 and u <= 5 then
       params.airSwingUD = u
       params.fanAutoMode = (u == -1) and 2 or 1
     end
-  elseif target == objects.air_swing_lr or target == getParamName(config, "air_swing_lr", "SwingLR") then
+  elseif target == objects.air_swing_lr or target == getParamName(config, "SwingLR") then
     local l = extractNumber(raw_val)
     if l and l >= -1 and l <= 5 then
       params.airSwingLR = l
       params.fanAutoMode = (l == -1) and 3 or 1
     end
-  elseif target == objects.nanoe or target == getParamName(config, "nanoe", "Nanoe") then
+  elseif target == objects.nanoe or target == getParamName(config, "Nanoe") then
     local n = extractNumber(raw_val)
     if n and n >= 0 and n <= 4 then params.nanoe = n end
-  elseif target == objects.eco_navi or target == getParamName(config, "eco_navi", "EcoNavi") then
+  elseif target == objects.eco_navi or target == getParamName(config, "EcoNavi") then
     local en = extractNumber(raw_val)
     if en and en >= 0 and en <= 2 then params.ecoNavi = en end
-  elseif target == objects.iauto_x or target == getParamName(config, "iauto_x", "IAutoX") then
+  elseif target == objects.iauto_x or target == getParamName(config, "IAutoX") then
     local ia = extractNumber(raw_val)
     if ia and ia >= 0 and ia <= 2 then params.iAutoX = ia end
-  elseif target == objects.inside_cleaning or target == getParamName(config, "inside_cleaning", "InsideCleaning") then
+  elseif target == objects.inside_cleaning or target == getParamName(config, "InsideCleaning") then
     local ic = extractNumber(raw_val)
     if ic and ic >= 0 and ic <= 1 then params.insideCleaning = ic end
   end

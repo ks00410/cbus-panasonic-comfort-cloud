@@ -38,9 +38,9 @@ local config = {
 
   -- (Optional) Explicitly override specific C-Bus UserParam names:
   cbus_params = {
-    -- power        = "Custom_AC_Power",
-    -- target_temp  = "Custom_SetPoint",
-    -- inside_temp  = "Living_Room_Temp",
+    -- Power        = "Custom_AC_Power",
+    -- TargetTemp   = "Custom_SetPoint",
+    -- InsideTemp   = "Living_Room_Temp",
   },
 
   -- (Optional) Map native C-Bus lighting / trigger Group Addresses (integers 0..255 or strings):
