@@ -30,11 +30,18 @@ local panasonic = require("user.panasonic")
 --   AC_Daily_kWh, AC_Heating_kWh, AC_Cooling_kWh, AC_CurrentPower_W
 --
 local config = {
-  cbus_network  = 0,        -- C-Bus Network ID (Default: 0)
-  param_prefix  = "AC_",    -- Prefix for C-Bus UserParams
-  debug_param   = "Debug",  -- C-Bus UserParam for debug toggle (Default: "Debug")
-  debug         = true,     -- Explicit debug toggle (logs URLs, headers, payloads, and raw responses)
+  cbus_network  = 0,        -- C-Bus Network ID (Default: 0 for local)
+  param_prefix  = "AC_",    -- Default prefix for C-Bus UserParams (e.g. AC_Power, AC_TargetTemp)
+  debug_param   = "Debug",  -- C-Bus UserParam for debug toggle (boolean)
+  debug         = false,    -- Explicit debug override (true/false)
   enable_energy = true,     -- Fetch daily energy telemetry (kWh)
+
+  -- (Optional) Explicitly override specific C-Bus UserParam names:
+  cbus_params = {
+    -- power        = "Custom_AC_Power",
+    -- target_temp  = "Custom_SetPoint",
+    -- inside_temp  = "Living_Room_Temp",
+  },
 
   -- (Optional) Map native C-Bus lighting / trigger Group Addresses (integers 0..255 or strings):
   cbus_objects = {

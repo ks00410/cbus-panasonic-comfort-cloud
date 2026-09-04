@@ -12,7 +12,16 @@ local panasonic = require("user.panasonic")
 -- CONFIGURATION
 -- =============================================================================
 local config = {
-  param_prefix = "AC_",     -- Prefix for C-Bus UserParams (e.g. AC_Power, AC_TargetTemp)
+  cbus_network = 0,         -- C-Bus Network ID (Default: 0 for local)
+  param_prefix = "AC_",     -- Default prefix for C-Bus UserParams (e.g. AC_Power, AC_TargetTemp)
+  debug_param  = "Debug",   -- C-Bus UserParam for debug toggle (boolean)
+  debug        = false,     -- Explicit debug override (true/false)
+
+  -- (Optional) Explicitly override specific C-Bus UserParam names:
+  cbus_params = {
+    -- power       = "Custom_AC_Power",
+    -- target_temp = "Custom_SetPoint",
+  },
 
   -- (Optional) Map native C-Bus lighting Group Addresses (integers 0..255 or strings):
   cbus_objects = {
