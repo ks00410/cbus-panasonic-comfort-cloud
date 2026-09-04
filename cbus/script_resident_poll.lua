@@ -33,6 +33,7 @@ local config = {
   cbus_network  = 0,        -- C-Bus Network ID (Default: 0)
   param_prefix  = "AC_",    -- Prefix for C-Bus UserParams
   debug_param   = "Debug",  -- C-Bus UserParam for debug toggle (Default: "Debug")
+  debug         = true,     -- Explicit debug toggle (logs URLs, headers, payloads, and raw responses)
   enable_energy = true,     -- Fetch daily energy telemetry (kWh)
 
   -- (Optional) Map native C-Bus lighting / trigger Group Addresses (integers 0..255 or strings):

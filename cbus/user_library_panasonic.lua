@@ -133,8 +133,9 @@ local _energyState = {}
 -- 5. LOGGING HELPERS
 -- =============================================================================
 
--- Check if debug logging is enabled via C-Bus UserParam (matches Ecowitt / cbus-lua pattern)
-local function isDebuggingEnabled(network, custom_debug_param)
+-- Check if debug logging is enabled via config table or C-Bus UserParam
+local function isDebuggingEnabled(network, custom_debug_param, explicit_debug)
+  if explicit_debug == true or explicit_debug == 1 then return true end
   local net = network or CBUS_NETWORK
   local param_name = custom_debug_param or DEBUG_PARAM
   local ok, val = pcall(GetUserParam, net, param_name)
@@ -757,7 +758,16 @@ function P.GetStatus(device_guid, dbg)
   end
   if not guid or #guid == 0 then return nil, "Device GUID is required" end
 
-  local code, resp = executeAccRequest("GET", "/deviceStatus/now/" .. prepareDeviceGuid(guid), nil, dbg)
+  -- 1. Try Live status endpoint (/deviceStatus/{guid})
+  local clean_guid = prepareDeviceGuid(guid)
+  local code, resp, raw = executeAccRequest("GET", "/deviceStatus/" .. clean_guid, nil, dbg)
+
+  -- 2. Fallback to Cached status endpoint (/deviceStatus/now/{guid}) if live endpoint is rejected
+  if code ~= 200 then
+    debuglog("Live status failed (HTTP " .. tostring(code) .. "), falling back to cached endpoint /deviceStatus/now/...", dbg)
+    code, resp, raw = executeAccRequest("GET", "/deviceStatus/now/" .. clean_guid, nil, dbg)
+  end
+
   if code == 200 and resp and resp.parameters then
     local p = resp.parameters
     local parsed = {
@@ -818,7 +828,7 @@ function P.GetStatus(device_guid, dbg)
     return parsed
   end
 
-  return nil, "Status request failed: HTTP " .. tostring(code)
+  return nil, "Status request failed (HTTP " .. tostring(code) .. "): " .. tostring(raw)
 end
 
 -- Send control parameters to an AC unit or individual zones
@@ -927,7 +937,7 @@ function P.Resident_Poll(config)
   end
 
   local net = config.cbus_network or CBUS_NETWORK
-  local dbg = isDebuggingEnabled(net, config.debug_param)
+  local dbg = isDebuggingEnabled(net, config.debug_param, config.debug)
   local status, err = P.GetStatus(guid, dbg)
   if not status then
     if err then log("PANASONIC Poll Error: " .. tostring(err)) end
@@ -1068,7 +1078,7 @@ function P.Event_Control(config, dst_target, val)
   end
 
   local net = config.cbus_network or CBUS_NETWORK
-  local dbg = isDebuggingEnabled(net, config.debug_param)
+  local dbg = isDebuggingEnabled(net, config.debug_param, config.debug)
   local objects = config.cbus_objects or {}
   local zone_map = config.cbus_zones or {}
   local pfx = config.param_prefix or "AC_"
